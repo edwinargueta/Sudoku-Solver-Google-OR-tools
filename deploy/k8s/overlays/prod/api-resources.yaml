@@ -1,0 +1,19 @@
+# A free Ampere VM has one or two cores in total. Requesting a whole one
+# would leave the pod Pending; CP-SAT is given two search workers in the
+# base config, which this comfortably covers.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+spec:
+  template:
+    spec:
+      containers:
+        - name: api
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 640Mi

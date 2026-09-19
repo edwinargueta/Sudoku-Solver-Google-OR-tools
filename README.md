@@ -80,7 +80,13 @@ machine defaults to.
 
 ```
 Sudoku Solver Google OR tools/
+├── compose.yaml                # nginx + uvicorn, the deployed shape locally
+├── deploy/k8s/
+│   ├── base/                   # deployments, services, ingress, config
+│   ├── bootstrap/              # cert-manager issuer, applied once per cluster
+│   └── overlays/{dev,prod}/    # what changes per environment
 ├── backend/
+│   ├── Dockerfile              # venv built in one stage, run in a slim one
 │   ├── app/
 │   │   ├── main.py             # app factory, CORS, router wiring
 │   │   ├── config.py           # settings, SUDOKU_-prefixed env vars
@@ -92,6 +98,8 @@ Sudoku Solver Google OR tools/
 │   │       └── solver.py       # the CP-SAT model  ← the interesting file
 │   └── tests/                  # 209 tests: board, solver, HTTP contract
 └── frontend/
+    ├── Dockerfile              # Vite build, then nginx serves the bundle
+    ├── nginx.conf.template     # SPA fallback + same-origin /api proxy
     ├── src/
     │   ├── App.jsx
     │   ├── api/client.js       # typed-ish fetch wrapper, one place for errors
@@ -209,6 +217,138 @@ badly graded puzzle fails the build rather than reaching the board.
 
 ---
 
+## Running it locally
+
+Three ways to run the same app, each one a step further from your editor.
+Pick by what you are actually testing.
+
+| Testing | Command | Serves on | Picks up an edit |
+|---|---|---|---|
+| the code | `make dev` | http://localhost:5173 | yes, both halves reload |
+| the image | `make up` | http://localhost:8080 | on the next run — it rebuilds |
+| the deploy | `make deploy ENV=dev` | http://sudoku.localhost | no, see below |
+
+`make dev` is the one to live in. Reach for `make up` when the thing under
+test is the container rather than the code — the nginx config, the SPA
+fallback, the same-origin proxy, or whether the image builds from a clean
+context. Reach for the cluster when it is the manifests: probes, generated
+config, ingress routing.
+
+The second and third need a Docker daemon, and the third a cluster; Rancher
+Desktop provides both, as does k3s.
+
+Rebuilding an image does **not** update what is already running in the
+cluster. The tag is still `:dev` and the pods pull `IfNotPresent`, so
+nothing about it looks new to Kubernetes:
+
+```bash
+make images
+kubectl -n sudoku-dev rollout restart deploy/api deploy/web
+```
+
+Neither `make test` nor `make lint` needs any of this running, which is why
+they are the check worth doing before a commit.
+
+---
+
+## Containers
+
+Two images. The backend builds its venv in one stage and copies it into a
+slim runtime; the frontend builds the bundle with Node and then serves it
+from nginx, which also proxies `/api` to the backend. That proxy is the
+production counterpart of the one in `vite.config.js`: the browser sees a
+single origin either way, so CORS never enters the picture.
+
+```bash
+make up            # build both, serve on http://localhost:8080
+make down
+make images IMAGE_TAG=v0.1.0
+```
+
+nginx is the only thing here that is not already a dependency — it earns its
+place by serving static files properly and by keeping the API same-origin,
+which the SPA fallback (`try_files … /index.html`) needs anyway.
+
+Both images run as a non-root user with a read-only root filesystem, so the
+writable paths nginx needs are mounted as `emptyDir` volumes in Kubernetes.
+
+---
+
+## Kubernetes
+
+`deploy/k8s` is a kustomize base with one overlay per environment. The base
+is the whole app; an overlay says what is different about a place.
+
+```bash
+make manifests ENV=dev     # render, change nothing
+make deploy ENV=dev        # apply to the current context
+make deploy ENV=prod
+```
+
+| | `dev` | `prod` |
+|---|---|---|
+| namespace | `sudoku-dev` | `sudoku-prod` |
+| images | local `:dev`, never pulled | `ghcr.io/…:latest`, built for arm64 |
+| replicas | 1 api, 1 web | 1 api, 2 web |
+| host | `sudoku.localhost` | your DuckDNS name |
+| TLS | none | cert-manager, Let's Encrypt |
+
+Both run Traefik, which k3s ships, so the ingress class is settled in the
+base rather than per overlay. The ingress splits the paths itself — `/api`
+to the API, everything else to the static bundle — which keeps the browser
+on one origin and CORS out of the picture. The API config is a generated
+ConfigMap, so its name carries a content hash and the pods actually roll
+when a value changes.
+
+Adding an environment means copying an overlay and changing the namespace,
+the host and the image tags.
+
+### Deploying it free, on Oracle Cloud
+
+The target is one Always Free Ampere VM running k3s: Traefik is built in,
+cert-manager issues the certificate, DuckDNS supplies the hostname, and
+GHCR stores the images. Nothing on that list costs anything.
+
+**The constraint that governs everything: the free VM is ARM64.** An amd64
+image crash-loops there with `exec format error`, so images must be built
+for `linux/arm64`:
+
+```bash
+docker login ghcr.io          # token needs write:packages
+make publish                  # cross-builds both, pushes :latest
+```
+
+Once per cluster, before the first deploy — the ClusterIssuer's kind does
+not exist until cert-manager's CRDs are installed, which is why it sits
+outside the overlays:
+
+```bash
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/<VERSION>/cert-manager.yaml
+kubectl apply -f deploy/k8s/bootstrap/clusterissuer.yaml
+```
+
+Three placeholders to fill in first: the DuckDNS hostname in
+`overlays/prod/ingress-tls.yaml` (in both the `tls` and `rules` blocks),
+the notification address in `bootstrap/clusterissuer.yaml`, and your
+registry in the `images:` block if it is not `ghcr.io/edwinargueta`.
+
+Then `make deploy ENV=prod`, and watch the certificate settle:
+
+```bash
+kubectl -n sudoku-prod get certificate -w
+```
+
+Two things reliably go wrong. DNS has to resolve to the VM *before* the
+first apply or the HTTP-01 challenge cannot complete, and Oracle's Ubuntu
+images ship iptables rules that drop 80 and 443 even after the cloud
+firewall is opened — fix the VM's local rules too, or the challenge times
+out against a port that looks open.
+
+While testing, point the issuer at Let's Encrypt staging. The production
+rate limits are per-domain and unforgiving.
+
+---
+
 ## Configuration
 
 Copy the examples and edit; every backend key is prefixed `SUDOKU_`.
@@ -225,6 +365,7 @@ cp frontend/.env.example frontend/.env.local
 | `SUDOKU_CORS_ORIGINS` | Vite dev server | JSON list of allowed origins |
 | `VITE_API_BASE_URL` | `/api` | Where the UI sends requests |
 | `VITE_PROXY_TARGET` | `http://127.0.0.1:8000` | Where the dev proxy forwards |
+| `BACKEND_ORIGIN` | `http://api:8000` | Where the container's nginx proxies `/api` |
 
 ---
 
@@ -233,5 +374,6 @@ cp frontend/.env.example frontend/.env.local
 - [ ] Generate puzzles on demand, rather than drawing from a fixed library
 - [ ] Explain a solve — surface the propagations, not just the answer
 - [ ] Variants: diagonal, killer, hyper — each is a handful of extra constraints
-- [ ] Dockerfile and a deploy target for the API
+- [x] Containers for both halves, and kustomize overlays to deploy them
+- [ ] Build and publish the images from CI on a tag
 - [ ] Import a puzzle from a photo

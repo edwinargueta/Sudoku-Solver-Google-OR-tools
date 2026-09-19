@@ -1,0 +1,39 @@
+# Single-node k3s on an Oracle Always Free Ampere VM: ARM64 images pulled
+# from GHCR, Traefik in front, cert-manager issuing the certificate.
+#
+# cert-manager and the ClusterIssuer in ../../bootstrap go on the cluster
+# first — both are cluster-scoped, and the issuer's kind does not exist
+# until cert-manager's CRDs are installed.
+#
+# Sized for that box, not for a real cluster. One or two cores are shared
+# with k3s, Traefik and cert-manager, so nothing here asks for a whole one.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: sudoku-prod
+
+resources:
+  - namespace.yaml
+  - ../../base
+
+# Built for linux/arm64 — an amd64 image crash-loops with "exec format
+# error" on Ampere. See `make publish`.
+images:
+  - name: sudoku-api
+    newName: ghcr.io/edwinargueta/sudoku-solver-google-or-tools-backend
+    newTag: latest
+  - name: sudoku-web
+    newName: ghcr.io/edwinargueta/sudoku-solver-google-or-tools-frontend
+    newTag: latest
+
+# The solver is the expensive half and the node is small: keep one of it,
+# and two of the cheap static server so an update rolls without a gap.
+replicas:
+  - name: api
+    count: 1
+  - name: web
+    count: 2
+
+patches:
+  - path: api-resources.yaml
+  - path: ingress-tls.yaml

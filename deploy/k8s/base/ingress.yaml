@@ -1,0 +1,30 @@
+# The ingress splits the two paths itself: /api to the API, everything else
+# to the static bundle. Same origin either way, so the browser never sees a
+# cross-origin request and CORS stays out of it.
+#
+# k3s ships Traefik, which is what both environments run, so the class is
+# settled here rather than per overlay.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sudoku
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: sudoku.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  name: http
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http

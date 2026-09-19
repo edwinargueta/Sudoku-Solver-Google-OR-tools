@@ -1,0 +1,32 @@
+# Local cluster: images built straight into the node's runtime, one replica
+# each, reachable at http://sudoku.localhost through an nginx ingress.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: sudoku-dev
+
+resources:
+  - namespace.yaml
+  - ../../base
+
+images:
+  - name: sudoku-api
+    newTag: dev
+  - name: sudoku-web
+    newTag: dev
+
+patches:
+  - target:
+      kind: Ingress
+      name: sudoku
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: sudoku.localhost
+  # Nothing is pushed to a registry locally, so never go looking for one.
+  - target:
+      kind: Deployment
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent

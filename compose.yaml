@@ -1,0 +1,23 @@
+# The deployed shape, locally: nginx on :8080 in front of uvicorn, one origin.
+name: sudoku-solver
+
+services:
+  api:
+    build: ./backend
+    environment:
+      SUDOKU_SOLVER_TIME_LIMIT_S: "10.0"
+      # Keep this near the CPUs the container actually gets.
+      SUDOKU_SOLVER_WORKERS: "4"
+    expose:
+      - "8000"
+
+  web:
+    build:
+      context: ./frontend
+    environment:
+      BACKEND_ORIGIN: http://api:8000
+    ports:
+      - "8080:8080"
+    depends_on:
+      api:
+        condition: service_healthy

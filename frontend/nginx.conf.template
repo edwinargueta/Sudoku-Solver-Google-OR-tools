@@ -1,0 +1,35 @@
+# Serves the built SPA and puts the API on the same origin, which is the
+# production counterpart of the proxy in vite.config.js. CORS never applies.
+server {
+    listen 8080;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Vite fingerprints these, so they can be cached hard. One header, not
+    # the two that `expires` plus `add_header` would emit.
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        proxy_pass ${BACKEND_ORIGIN};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # FastAPI hangs its docs off the root, outside the /api prefix.
+    location ~ ^/(docs|redoc|openapi\.json) {
+        proxy_pass ${BACKEND_ORIGIN};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+}

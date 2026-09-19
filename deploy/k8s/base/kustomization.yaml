@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - backend.yaml
+  - frontend.yaml
+  - ingress.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: sudoku-solver
+    includeSelectors: false
+
+# Generated, so the name carries a content hash: change a value here and the
+# api pods roll on the next apply instead of silently keeping the old config.
+configMapGenerator:
+  - name: api-config
+    literals:
+      - SUDOKU_SOLVER_TIME_LIMIT_S=10.0
+      # At or below the pod's CPU limit. CP-SAT will start eight search
+      # workers on a one-core pod and spend the time context-switching.
+      - SUDOKU_SOLVER_WORKERS=2
+
+images:
+  - name: sudoku-api
+    newTag: dev
+  - name: sudoku-web
+    newTag: dev

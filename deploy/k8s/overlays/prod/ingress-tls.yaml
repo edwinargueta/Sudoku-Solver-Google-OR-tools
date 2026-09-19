@@ -1,0 +1,35 @@
+# The real hostname and the certificate that goes with it. cert-manager
+# sees the annotation, solves the HTTP-01 challenge over port 80, and fills
+# in the secret named below.
+#
+# Replace CHANGE-ME with the DuckDNS subdomain pointing at the VM. DNS has
+# to resolve before the first apply or the challenge cannot complete.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sudoku
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  tls:
+    - hosts:
+        - CHANGE-ME.duckdns.org
+      secretName: sudoku-tls
+  rules:
+    - host: CHANGE-ME.duckdns.org
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  name: http
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  name: http
