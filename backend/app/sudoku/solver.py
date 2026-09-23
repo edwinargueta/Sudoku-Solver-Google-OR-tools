@@ -114,6 +114,11 @@ class _SolutionCollector(cp_model.CpSolverSolutionCallback):
         self.hit_limit = False
 
     def on_solution_callback(self) -> None:
+        # stop_search() is a request, not a guarantee: the single-solution
+        # path runs eight workers, and another can report before the search
+        # winds up. Without this guard the ceiling is exceeded now and then.
+        if len(self.solutions) >= self._limit:
+            return
         self.solutions.append([[int(self.value(cell)) for cell in row] for row in self._cells])
         if len(self.solutions) >= self._limit:
             self.hit_limit = True

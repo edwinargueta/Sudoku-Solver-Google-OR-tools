@@ -24,7 +24,7 @@ help:
 	@echo "api       - run just the FastAPI backend on :8000"
 	@echo "web       - run just the React frontend on :5173"
 	@echo "test      - run the backend test suite"
-	@echo "lint      - ruff on the backend, eslint on the frontend"
+	@echo "lint      - ruff on the backend, eslint and tsc on the frontend"
 	@echo "clean     - remove build artifacts, caches, and node_modules"
 	@echo "images    - build both container images at :$(IMAGE_TAG)"
 	@echo "publish   - cross-build for $(PLATFORM) and push to $(REGISTRY)"
@@ -59,6 +59,7 @@ test:
 lint:
 	cd $(BACKEND) && .venv/bin/python -m ruff check app tests
 	cd $(FRONTEND) && npm run lint
+	cd $(FRONTEND) && npm run typecheck
 
 images:
 	docker build -t sudoku-api:$(IMAGE_TAG) $(BACKEND)

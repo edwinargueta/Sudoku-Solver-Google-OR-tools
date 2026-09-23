@@ -1,5 +1,5 @@
 # Serves the built SPA and puts the API on the same origin, which is the
-# production counterpart of the proxy in vite.config.js. CORS never applies.
+# production counterpart of the proxy in vite.config.ts. CORS never applies.
 server {
     listen 8080;
     server_name _;

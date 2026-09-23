@@ -1,6 +1,14 @@
 /** Status line plus the CP-SAT search statistics behind the last solve. */
 
-export default function StatusPanel({ status, stats }) {
+import type { SolveResponse } from '../api/types'
+import type { Status } from '../hooks/useSudoku'
+
+interface StatusPanelProps {
+  status: Status
+  stats: SolveResponse | null
+}
+
+export default function StatusPanel({ status, stats }: StatusPanelProps) {
   return (
     <div className="status">
       <p className={`status__message status__message--${status.kind}`} role="status">

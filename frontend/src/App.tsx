@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { getHealth } from './api/client'
+import type { Health } from './api/types'
 import StatusPanel from './components/StatusPanel'
 import SudokuGrid from './components/SudokuGrid'
 import Toolbar from './components/Toolbar'
@@ -11,14 +12,18 @@ const DOCS_URL = import.meta.env.VITE_API_DOCS_URL ?? 'http://127.0.0.1:8000/doc
 
 /** Small badge in the header proving the backend is up and which build it runs. */
 function BackendBadge() {
-  const [health, setHealth] = useState(null)
+  const [health, setHealth] = useState<Health | null>(null)
   const [failed, setFailed] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     getHealth()
-      .then((data) => !cancelled && setHealth(data))
-      .catch(() => !cancelled && setFailed(true))
+      .then((data) => {
+        if (!cancelled) setHealth(data)
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true)
+      })
     return () => {
       cancelled = true
     }

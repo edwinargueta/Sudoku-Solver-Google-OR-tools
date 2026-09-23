@@ -1,0 +1,27 @@
+{
+  // The browser half. Node types are deliberately absent: `process` has no
+  // business in a component, and leaving them out makes that a type error.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "types": ["vite/client"],
+
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+
+    // Vite does the emitting; tsc is only ever asked whether it type-checks.
+    "noEmit": true
+  },
+  "include": ["src"]
+}

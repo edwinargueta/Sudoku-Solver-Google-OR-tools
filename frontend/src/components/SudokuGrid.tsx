@@ -1,8 +1,20 @@
 /** The 9x9 board: one input per cell, with arrow-key navigation. */
 
-import { EMPTY, SIZE } from '../lib/grid'
+import type { ChangeEvent, KeyboardEvent } from 'react'
 
-function cellClassName({ row, col, isGiven, isSolved, isConflicted }) {
+import type { Grid } from '../api/types'
+import type { CellKey } from '../lib/grid'
+import { EMPTY, SIZE, cellKey } from '../lib/grid'
+
+interface CellState {
+  row: number
+  col: number
+  isGiven: boolean
+  isSolved: boolean
+  isConflicted: boolean
+}
+
+function cellClassName({ row, col, isGiven, isSolved, isConflicted }: CellState): string {
   return [
     'cell',
     col % 3 === 2 && col !== SIZE - 1 ? 'cell--box-right' : '',
@@ -15,17 +27,31 @@ function cellClassName({ row, col, isGiven, isSolved, isConflicted }) {
     .join(' ')
 }
 
-function focusCell(row, col) {
-  const next = document.querySelector(`[data-cell="${row},${col}"]`)
+function focusCell(row: number, col: number): void {
+  const next = document.querySelector<HTMLInputElement>(`[data-cell="${cellKey(row, col)}"]`)
   if (next) {
     next.focus()
-    next.select?.()
+    next.select()
   }
 }
 
-export default function SudokuGrid({ grid, givens, conflictedCells, readOnly, onChange }) {
-  function handleKeyDown(event, row, col) {
-    const moves = {
+interface SudokuGridProps {
+  grid: Grid
+  givens: Set<CellKey>
+  conflictedCells: Set<CellKey>
+  readOnly: boolean
+  onChange: (row: number, col: number, value: number) => void
+}
+
+export default function SudokuGrid({
+  grid,
+  givens,
+  conflictedCells,
+  readOnly,
+  onChange,
+}: SudokuGridProps) {
+  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>, row: number, col: number): void {
+    const moves: Record<string, [number, number]> = {
       ArrowUp: [row - 1, col],
       ArrowDown: [row + 1, col],
       ArrowLeft: [row, col - 1],
@@ -47,7 +73,7 @@ export default function SudokuGrid({ grid, givens, conflictedCells, readOnly, on
   }
 
   // Typing replaces the cell rather than appending, so 5 then 7 leaves a 7.
-  function handleChange(event, row, col) {
+  function handleChange(event: ChangeEvent<HTMLInputElement>, row: number, col: number): void {
     const typed = event.target.value.replace(/[^1-9]/g, '').slice(-1)
     onChange(row, col, typed === '' ? EMPTY : Number(typed))
   }
@@ -56,7 +82,7 @@ export default function SudokuGrid({ grid, givens, conflictedCells, readOnly, on
     <div className="grid" role="grid" aria-label="Sudoku board">
       {grid.map((cells, row) =>
         cells.map((value, col) => {
-          const key = `${row},${col}`
+          const key = cellKey(row, col)
           return (
             <input
               key={key}

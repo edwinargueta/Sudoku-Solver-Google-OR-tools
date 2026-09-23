@@ -122,6 +122,13 @@ class TestMultipleSolutions:
     def test_max_solutions_is_clamped_to_at_least_one(self) -> None:
         assert solve(parse_grid(PUZZLES["easy-1"].puzzle), max_solutions=0).solution_count == 1
 
+    def test_the_ceiling_holds_against_a_parallel_search(self) -> None:
+        # A single-solution solve runs several workers, and more than one can
+        # report before the search stops. Once was enough to make this flaky.
+        puzzle = parse_grid(PUZZLES["easy-1"].puzzle)
+        counts = {solve(puzzle, max_solutions=1).solution_count for _ in range(25)}
+        assert counts == {1}, f"collected more than asked for: {sorted(counts)}"
+
 
 class TestUniqueness:
     @pytest.mark.parametrize("key", SOLVABLE_KEYS)

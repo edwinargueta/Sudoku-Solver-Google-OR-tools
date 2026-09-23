@@ -1,5 +1,21 @@
 /** Difficulty picker and the actions that drive the solver. */
 
+import type { Level } from '../api/types'
+
+interface ToolbarProps {
+  levels: Level[]
+  level: string
+  busy: boolean
+  isEmpty: boolean
+  checkUnique: boolean
+  onPickLevel: (level: string) => void
+  onShuffle: () => void
+  onSolve: () => void
+  onCheck: () => void
+  onClear: () => void
+  onToggleUnique: (checked: boolean) => void
+}
+
 export default function Toolbar({
   levels,
   level,
@@ -12,7 +28,7 @@ export default function Toolbar({
   onCheck,
   onClear,
   onToggleUnique,
-}) {
+}: ToolbarProps) {
   const chosen = levels.find((entry) => entry.key === level)
 
   return (

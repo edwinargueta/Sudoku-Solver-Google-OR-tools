@@ -9,19 +9,34 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { getRandomPuzzle, listLevels, solvePuzzle, validateGrid } from '../api/client'
+import type { Conflict, Grid, Level, Puzzle, SolveResponse } from '../api/types'
+import type { CellKey } from '../lib/grid'
 import { EMPTY, cloneGrid, conflictKeys, emptyGrid, givenKeys, setCell } from '../lib/grid'
 
-const IDLE = { kind: 'idle', message: 'Type a puzzle, or pick a difficulty.' }
+/** How the status line is coloured, and what it says. */
+export type StatusKind = 'idle' | 'ok' | 'warn' | 'error'
+
+export interface Status {
+  kind: StatusKind
+  message: string
+}
+
+const IDLE: Status = { kind: 'idle', message: 'Type a puzzle, or pick a difficulty.' }
+
+/** Anything thrown by the client is an Error; anything else gets a fallback. */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : 'Something went wrong'
+}
 
 export function useSudoku() {
-  const [grid, setGrid] = useState(emptyGrid)
-  const [givens, setGivens] = useState(() => new Set())
-  const [solution, setSolution] = useState(null)
-  const [conflicts, setConflicts] = useState([])
-  const [status, setStatus] = useState(IDLE)
-  const [stats, setStats] = useState(null)
+  const [grid, setGrid] = useState<Grid>(emptyGrid)
+  const [givens, setGivens] = useState<Set<CellKey>>(() => new Set())
+  const [solution, setSolution] = useState<Grid | null>(null)
+  const [conflicts, setConflicts] = useState<Conflict[]>([])
+  const [status, setStatus] = useState<Status>(IDLE)
+  const [stats, setStats] = useState<SolveResponse | null>(null)
   const [busy, setBusy] = useState(false)
-  const [levels, setLevels] = useState([])
+  const [levels, setLevels] = useState<Level[]>([])
   const [level, setLevel] = useState('')
   const [checkUnique, setCheckUnique] = useState(true)
 
@@ -31,8 +46,8 @@ export function useSudoku() {
       .then((data) => {
         if (!cancelled) setLevels(data)
       })
-      .catch((error) => {
-        if (!cancelled) setStatus({ kind: 'error', message: error.message })
+      .catch((error: unknown) => {
+        if (!cancelled) setStatus({ kind: 'error', message: messageOf(error) })
       })
     return () => {
       cancelled = true
@@ -44,7 +59,7 @@ export function useSudoku() {
   const conflictedCells = useMemo(() => conflictKeys(conflicts), [conflicts])
 
   /** Editing anywhere invalidates the displayed solution. */
-  const updateCell = useCallback((row, col, value) => {
+  const updateCell = useCallback((row: number, col: number, value: number) => {
     setSolution(null)
     setConflicts([])
     setStats(null)
@@ -52,7 +67,7 @@ export function useSudoku() {
     setGrid((current) => setCell(current, row, col, value))
   }, [])
 
-  const loadPuzzle = useCallback((puzzle) => {
+  const loadPuzzle = useCallback((puzzle: Puzzle) => {
     setGrid(cloneGrid(puzzle.grid))
     setGivens(givenKeys(puzzle.grid))
     setSolution(null)
@@ -63,13 +78,13 @@ export function useSudoku() {
 
   /** Pick a difficulty: the server draws one of that level's puzzles at random. */
   const loadLevel = useCallback(
-    async (levelKey) => {
+    async (levelKey: string) => {
       setLevel(levelKey)
       setBusy(true)
       try {
         loadPuzzle(await getRandomPuzzle(levelKey))
-      } catch (error) {
-        setStatus({ kind: 'error', message: error.message })
+      } catch (error: unknown) {
+        setStatus({ kind: 'error', message: messageOf(error) })
       } finally {
         setBusy(false)
       }
@@ -79,7 +94,7 @@ export function useSudoku() {
 
   /** Re-draw from the level already chosen, for a different puzzle at the same level. */
   const shuffle = useCallback(() => {
-    if (level) loadLevel(level)
+    if (level) void loadLevel(level)
   }, [level, loadLevel])
 
   const clear = useCallback(() => {
@@ -105,7 +120,10 @@ export function useSudoku() {
           : result.unique
             ? ' · unique solution'
             : ' · more than one solution'
-        setStatus({ kind: 'ok', message: `Solved in ${result.wall_time_ms.toFixed(1)} ms${uniqueness}` })
+        setStatus({
+          kind: 'ok',
+          message: `Solved in ${result.wall_time_ms.toFixed(1)} ms${uniqueness}`,
+        })
       } else if (result.status === 'INFEASIBLE') {
         setSolution(null)
         setConflicts(result.conflicts)
@@ -118,8 +136,8 @@ export function useSudoku() {
       } else {
         setStatus({ kind: 'warn', message: 'CP-SAT hit its time limit without an answer.' })
       }
-    } catch (error) {
-      setStatus({ kind: 'error', message: error.message })
+    } catch (error: unknown) {
+      setStatus({ kind: 'error', message: messageOf(error) })
     } finally {
       setBusy(false)
     }
@@ -141,14 +159,17 @@ export function useSudoku() {
           message: `${result.conflicts.length} conflict(s): ${result.conflicts[0].message}`,
         })
       }
-    } catch (error) {
-      setStatus({ kind: 'error', message: error.message })
+    } catch (error: unknown) {
+      setStatus({ kind: 'error', message: messageOf(error) })
     } finally {
       setBusy(false)
     }
   }, [displayGrid])
 
-  const isEmpty = useMemo(() => displayGrid.every((row) => row.every((v) => v === EMPTY)), [displayGrid])
+  const isEmpty = useMemo(
+    () => displayGrid.every((row) => row.every((value) => value === EMPTY)),
+    [displayGrid],
+  )
 
   return {
     grid,

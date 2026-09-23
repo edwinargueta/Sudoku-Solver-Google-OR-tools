@@ -4,7 +4,8 @@ A Sudoku solver with no search code in it. The rules are stated as constraints,
 [Google OR-Tools](https://developers.google.com/optimization) CP-SAT does the
 solving, and a React front end lets you watch it happen.
 
-**Stack:** FastAPI + OR-Tools on the backend, React (Vite) on the front end.
+**Stack:** FastAPI + OR-Tools on the backend, React + TypeScript (Vite) on
+the front end.
 
 ---
 
@@ -96,17 +97,20 @@ Sudoku Solver Google OR tools/
 │   │       ├── board.py        # grid vocabulary: parse, format, conflicts
 │   │       ├── puzzles.py      # graded puzzle library, ten per level
 │   │       └── solver.py       # the CP-SAT model  ← the interesting file
-│   └── tests/                  # 209 tests: board, solver, HTTP contract
+│   └── tests/                  # 210 tests: board, solver, HTTP contract
 └── frontend/
     ├── Dockerfile              # Vite build, then nginx serves the bundle
     ├── nginx.conf.template     # SPA fallback + same-origin /api proxy
     ├── src/
-    │   ├── App.jsx
-    │   ├── api/client.js       # typed-ish fetch wrapper, one place for errors
-    │   ├── hooks/useSudoku.js  # all board state and API traffic
-    │   ├── lib/grid.js         # pure grid helpers
+    │   ├── App.tsx
+    │   ├── api/client.ts       # fetch wrapper, one place for errors
+    │   ├── api/types.ts        # the wire contract, mirroring the Pydantic models
+    │   ├── hooks/useSudoku.ts  # all board state and API traffic
+    │   ├── lib/grid.ts         # pure grid helpers
     │   └── components/         # SudokuGrid, Toolbar, StatusPanel
-    └── vite.config.js
+    ├── tsconfig.json           # the browser half; no Node types on purpose
+    ├── tsconfig.node.json      # vite.config.ts, which does run in Node
+    └── vite.config.ts
 ```
 
 Every module under `app/sudoku/` runs on its own:
@@ -202,7 +206,7 @@ the event loop.
 make test          # or: cd backend && .venv/bin/python -m pytest
 ```
 
-209 tests in three layers, each able to fail on its own:
+210 tests in three layers, each able to fail on its own:
 
 | File | Covers |
 |---|---|
@@ -256,7 +260,7 @@ they are the check worth doing before a commit.
 Two images. The backend builds its venv in one stage and copies it into a
 slim runtime; the frontend builds the bundle with Node and then serves it
 from nginx, which also proxies `/api` to the backend. That proxy is the
-production counterpart of the one in `vite.config.js`: the browser sees a
+production counterpart of the one in `vite.config.ts`: the browser sees a
 single origin either way, so CORS never enters the picture.
 
 ```bash
