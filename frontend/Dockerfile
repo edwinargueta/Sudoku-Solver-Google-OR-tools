@@ -1,6 +1,10 @@
 # Node builds the bundle and then stays behind: the runtime image is nginx
 # and static files, nothing else.
-FROM node:20-alpine AS build
+#
+# $BUILDPLATFORM pins this stage to the machine doing the building. The output
+# is JavaScript and CSS — no architecture in it — so cross-building for arm64
+# emulates only the nginx stage instead of the whole npm install.
+FROM --platform=$BUILDPLATFORM node:20-alpine AS build
 
 WORKDIR /src
 COPY package.json package-lock.json .npmrc ./

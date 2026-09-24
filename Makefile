@@ -11,7 +11,7 @@ ENV         ?= dev
 # Where `make publish` pushes, and for which architecture. The Always Free
 # Ampere VM is ARM: an amd64 image crash-loops there with "exec format error".
 REGISTRY    ?= ghcr.io/edwinargueta
-REPO_SLUG   ?= sudoku-solver-google-or-tools
+REPO_SLUG   ?= sudoku
 PUBLISH_TAG ?= latest
 PLATFORM    ?= linux/arm64
 

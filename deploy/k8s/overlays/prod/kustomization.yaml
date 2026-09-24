@@ -17,13 +17,15 @@ resources:
   - ../../base
 
 # Built for linux/arm64 — an amd64 image crash-loops with "exec format
-# error" on Ampere. See `make publish`.
+# error" on Ampere. Pushed by .github/workflows/build-and-push.yml, or by
+# `make publish` from a machine with buildx. These names must match what
+# that workflow tags, or the pods sit in ImagePullBackOff.
 images:
   - name: sudoku-api
-    newName: ghcr.io/edwinargueta/sudoku-solver-google-or-tools-backend
+    newName: ghcr.io/edwinargueta/sudoku-backend
     newTag: latest
   - name: sudoku-web
-    newName: ghcr.io/edwinargueta/sudoku-solver-google-or-tools-frontend
+    newName: ghcr.io/edwinargueta/sudoku-frontend
     newTag: latest
 
 # The solver is the expensive half and the node is small: keep one of it,

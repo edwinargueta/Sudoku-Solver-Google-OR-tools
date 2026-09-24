@@ -2,8 +2,9 @@
 # sees the annotation, solves the HTTP-01 challenge over port 80, and fills
 # in the secret named below.
 #
-# Replace CHANGE-ME with the DuckDNS subdomain pointing at the VM. DNS has
-# to resolve before the first apply or the challenge cannot complete.
+# The host below has to resolve to the VM before the first apply, or the
+# challenge has nowhere to land. It appears twice on purpose: once for the
+# certificate, once for the routing rule. Change both together.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -13,10 +14,10 @@ metadata:
 spec:
   tls:
     - hosts:
-        - CHANGE-ME.duckdns.org
+        - sudoku-csp.duckdns.org
       secretName: sudoku-tls
   rules:
-    - host: CHANGE-ME.duckdns.org
+    - host: sudoku-csp.duckdns.org
       http:
         paths:
           - path: /api

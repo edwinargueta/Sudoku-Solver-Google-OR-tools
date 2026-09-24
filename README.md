@@ -81,6 +81,7 @@ machine defaults to.
 
 ```
 Sudoku Solver Google OR tools/
+├── .github/workflows/          # builds arm64 images, pushes them to GHCR
 ├── compose.yaml                # nginx + uvicorn, the deployed shape locally
 ├── deploy/k8s/
 │   ├── base/                   # deployments, services, ingress, config
@@ -307,49 +308,123 @@ when a value changes.
 Adding an environment means copying an overlay and changing the namespace,
 the host and the image tags.
 
-### Deploying it free, on Oracle Cloud
+### How a deploy works
 
-The target is one Always Free Ampere VM running k3s: Traefik is built in,
-cert-manager issues the certificate, DuckDNS supplies the hostname, and
-GHCR stores the images. Nothing on that list costs anything.
+```
+push to main
+     │
+     ▼
+GitHub Actions  ──builds linux/arm64──▶  ghcr.io/<owner>/sudoku-backend
+                                          ghcr.io/<owner>/sudoku-frontend
+                                          tagged :latest and :<commit sha>
+     │
+     │  kubectl rollout restart
+     ▼
+k3s on the Ampere VM  ──pulls :latest──▶  api and web pods swap
+     │
+     ▼
+Traefik  ──▶  https://<your host>        certificate from cert-manager
+```
+
+Everything above the cluster is automatic; the rollout is not. The
+workflow in `.github/workflows/` builds both images for `linux/arm64` on
+every push to `main` and pushes them to GHCR under the names the prod
+overlay pulls. The frontend's Node stage is pinned to `$BUILDPLATFORM`, so the
+bundle is built natively on the x86 runner and only the small nginx stage
+is emulated. Documentation and manifest changes skip the workflow.
+
+The repository is public, so Actions minutes are free and the packages can
+be public too — which is why no pull secret appears anywhere in
+`deploy/k8s`.
+
+So the loop, once the cluster exists, is:
+
+```bash
+git push                                                   # CI builds and pushes
+kubectl -n sudoku-prod rollout restart deploy/api deploy/web
+kubectl -n sudoku-prod rollout status deploy/api deploy/web
+```
+
+That middle step is not optional. The tag is still `latest`, so nothing
+about the Deployment has changed and Kubernetes has no reason to pull
+again on its own.
+
+To go back to a known-good build, use the commit tag that CI also pushes:
+
+```bash
+kubectl -n sudoku-prod set image deploy/api \
+  api=ghcr.io/<owner>/sudoku-backend:<commit-sha>
+```
+
+`make publish` does the same build from a laptop and skips CI entirely,
+which is handy when a run is queued behind something slow.
+
+### One-time setup
+
+The target is a single Oracle Always Free Ampere VM running k3s: Traefik
+is built in, cert-manager issues the certificate, DuckDNS supplies the
+hostname, and GHCR stores the images. None of it costs anything.
 
 **The constraint that governs everything: the free VM is ARM64.** An amd64
-image crash-loops there with `exec format error`, so images must be built
-for `linux/arm64`:
+image crash-loops there with `exec format error`, which is why CI builds
+for `linux/arm64` and why the backend sits on `python:3.13-slim` — Debian
+rather than Alpine, so the OR-Tools aarch64 wheel installs as a binary
+instead of trying to compile.
+
+1. **Provision the VM** and open 22, 80 and 443 in the OCI security list.
+   Then fix the VM's own iptables, which drop 80 and 443 regardless of the
+   cloud firewall — this is the single most common way the setup appears
+   to work and does not.
+2. **Point DNS at it.** `dig +short <host>` must return the VM's IP
+   *before* the first deploy, or the Let's Encrypt HTTP-01 challenge has
+   nowhere to land.
+3. **Install k3s** on the VM: `curl -sfL https://get.k3s.io | sh -`.
+   Manage it over an SSH tunnel rather than exposing port 6443.
+4. **Push once and make the packages public.** After the first green
+   Actions run, both images appear under your GitHub profile → Packages;
+   set each to Public so k3s can pull without credentials.
+5. **Install cert-manager and the issuer.** The ClusterIssuer lives
+   outside the overlays because its kind does not exist until the CRDs
+   are in place:
+
+   ```bash
+   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/<VERSION>/cert-manager.yaml
+   kubectl apply -f deploy/k8s/bootstrap/clusterissuer.yaml
+   ```
+
+6. **Fill in the placeholders**, then deploy:
+
+   | Where | What |
+   |---|---|
+   | `overlays/prod/ingress-tls.yaml` | your hostname, in both the `tls` and `rules` blocks |
+   | `bootstrap/clusterissuer.yaml` | the address Let's Encrypt emails about expiry |
+   | `overlays/prod/kustomization.yaml` | the registry owner, if it is not `edwinargueta` |
+
+   ```bash
+   make deploy ENV=prod
+   kubectl -n sudoku-prod get certificate -w    # READY should turn True
+   ```
+
+While testing, point the issuer at Let's Encrypt **staging** first. The
+production rate limits are per-domain and unforgiving, and a few failed
+attempts can lock you out for a week.
+
+### When it goes wrong
+
+| Symptom | Cause |
+|---|---|
+| `exec format error` | an amd64 image on the ARM VM — check the workflow built `linux/arm64` |
+| `ImagePullBackOff` | the package is still private, or its name does not match the overlay's `image:` |
+| Certificate stuck not ready | DNS does not resolve to the VM, or 80 is blocked by the VM's iptables |
+| New code not live | no `rollout restart` after CI pushed a new `:latest` |
+| Pods `Pending` | the free VM has one or two cores; the requests in `api-resources.yaml` assume that |
 
 ```bash
-docker login ghcr.io          # token needs write:packages
-make publish                  # cross-builds both, pushes :latest
+kubectl -n sudoku-prod get pods
+kubectl -n sudoku-prod logs deploy/api
+kubectl -n sudoku-prod describe certificate sudoku-tls
+kubectl -n sudoku-prod get events --sort-by=.lastTimestamp
 ```
-
-Once per cluster, before the first deploy — the ClusterIssuer's kind does
-not exist until cert-manager's CRDs are installed, which is why it sits
-outside the overlays:
-
-```bash
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/<VERSION>/cert-manager.yaml
-kubectl apply -f deploy/k8s/bootstrap/clusterissuer.yaml
-```
-
-Three placeholders to fill in first: the DuckDNS hostname in
-`overlays/prod/ingress-tls.yaml` (in both the `tls` and `rules` blocks),
-the notification address in `bootstrap/clusterissuer.yaml`, and your
-registry in the `images:` block if it is not `ghcr.io/edwinargueta`.
-
-Then `make deploy ENV=prod`, and watch the certificate settle:
-
-```bash
-kubectl -n sudoku-prod get certificate -w
-```
-
-Two things reliably go wrong. DNS has to resolve to the VM *before* the
-first apply or the HTTP-01 challenge cannot complete, and Oracle's Ubuntu
-images ship iptables rules that drop 80 and 443 even after the cloud
-firewall is opened — fix the VM's local rules too, or the challenge times
-out against a port that looks open.
-
-While testing, point the issuer at Let's Encrypt staging. The production
-rate limits are per-domain and unforgiving.
 
 ---
 
@@ -379,5 +454,6 @@ cp frontend/.env.example frontend/.env.local
 - [ ] Explain a solve — surface the propagations, not just the answer
 - [ ] Variants: diagonal, killer, hyper — each is a handful of extra constraints
 - [x] Containers for both halves, and kustomize overlays to deploy them
-- [ ] Build and publish the images from CI on a tag
+- [x] Build and publish arm64 images from CI on every push to `main`
+- [ ] Have the cluster pull new images by itself, rather than a rollout restart
 - [ ] Import a puzzle from a photo
