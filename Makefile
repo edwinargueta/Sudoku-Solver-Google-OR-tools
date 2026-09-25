@@ -15,15 +15,15 @@ REPO_SLUG   ?= sudoku
 PUBLISH_TAG ?= latest
 PLATFORM    ?= linux/arm64
 
-.PHONY: help setup setup-backend setup-frontend dev api web test lint clean \
-        images publish up down manifests deploy
+.PHONY: help setup setup-backend setup-frontend dev api web test test-backend \
+        test-frontend lint clean images publish up down manifests deploy
 
 help:
 	@echo "setup     - create the venv, install backend and frontend deps"
 	@echo "dev       - run the API and the Vite dev server together"
 	@echo "api       - run just the FastAPI backend on :8000"
 	@echo "web       - run just the React frontend on :5173"
-	@echo "test      - run the backend test suite"
+	@echo "test      - run both test suites"
 	@echo "lint      - ruff on the backend, eslint and tsc on the frontend"
 	@echo "clean     - remove build artifacts, caches, and node_modules"
 	@echo "images    - build both container images at :$(IMAGE_TAG)"
@@ -53,8 +53,13 @@ web:
 dev:
 	@trap 'kill 0' EXIT INT TERM; $(MAKE) api & $(MAKE) web
 
-test:
+test: test-backend test-frontend
+
+test-backend:
 	cd $(BACKEND) && .venv/bin/python -m pytest
+
+test-frontend:
+	cd $(FRONTEND) && npm test
 
 lint:
 	cd $(BACKEND) && .venv/bin/python -m ruff check app tests

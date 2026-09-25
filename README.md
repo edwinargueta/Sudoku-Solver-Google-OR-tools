@@ -81,7 +81,7 @@ machine defaults to.
 
 ```
 Sudoku Solver Google OR tools/
-├── .github/workflows/          # builds arm64 images, pushes them to GHCR
+├── .github/workflows/          # tests, then arm64 images pushed to GHCR
 ├── compose.yaml                # nginx + uvicorn, the deployed shape locally
 ├── deploy/k8s/
 │   ├── base/                   # deployments, services, ingress, config
@@ -98,7 +98,7 @@ Sudoku Solver Google OR tools/
 │   │       ├── board.py        # grid vocabulary: parse, format, conflicts
 │   │       ├── puzzles.py      # graded puzzle library, ten per level
 │   │       └── solver.py       # the CP-SAT model  ← the interesting file
-│   └── tests/                  # 210 tests: board, solver, HTTP contract
+│   └── tests/                  # 223 tests: board, solver, HTTP, settings
 └── frontend/
     ├── Dockerfile              # Vite build, then nginx serves the bundle
     ├── nginx.conf.template     # SPA fallback + same-origin /api proxy
@@ -204,21 +204,34 @@ the event loop.
 ## Tests
 
 ```bash
-make test          # or: cd backend && .venv/bin/python -m pytest
+make test              # both suites
+make test-backend      # pytest
+make test-frontend     # vitest
 ```
 
-210 tests in three layers, each able to fail on its own:
+**288 tests**: 223 on the backend with pytest, 65 on the front end with
+Vitest. Every file is meant to be able to fail on its own.
 
 | File | Covers |
 |---|---|
-| `tests/test_board.py` | parsing, formatting, conflicts, completeness, the puzzle library |
-| `tests/test_solver.py` | model shape, every sample, uniqueness, infeasibility, time limits |
-| `tests/test_api.py` | status codes, payload shapes, 422s, CORS |
+| `backend/tests/test_board.py` | parsing, formatting, conflicts, the puzzle library and lookups |
+| `backend/tests/test_solver.py` | model shape, every sample, uniqueness, infeasibility, time limits |
+| `backend/tests/test_api.py` | status codes, payload shapes, 422s, CORS |
+| `backend/tests/test_config.py` | defaults, the `SUDOKU_` prefix, the cached singleton |
+| `frontend/src/lib/grid.test.ts` | the pure grid helpers, including that rows are not aliased |
+| `frontend/src/api/client.test.ts` | request shapes, and every way a request can fail |
+| `frontend/src/hooks/useSudoku.test.ts` | the state machine: load, edit, solve, check, clear |
+| `frontend/src/components/*.test.tsx` | rendering, typing, arrow keys, disabled states |
 
 The solver suite asserts the property that matters: a solution must be a
 complete valid grid **that leaves every given in place**. Every one of the
 forty samples is checked for shape, consistency and a unique solution, so a
 badly graded puzzle fails the build rather than reaching the board.
+
+The front-end tests mock `fetch` and the API client rather than starting a
+server, so `make test` needs nothing running. Component tests drive the
+board the way a person does — typing a digit, pressing Backspace, walking
+the grid with arrow keys — instead of reaching for internals.
 
 ---
 
@@ -252,7 +265,8 @@ kubectl -n sudoku-dev rollout restart deploy/api deploy/web
 ```
 
 Neither `make test` nor `make lint` needs any of this running, which is why
-they are the check worth doing before a commit.
+they are the check worth doing before a commit — and they are exactly what
+CI runs before it will build an image.
 
 ---
 
@@ -327,9 +341,11 @@ Traefik  ──▶  https://<your host>        certificate from cert-manager
 ```
 
 Everything above the cluster is automatic; the rollout is not. The
-workflow in `.github/workflows/` builds both images for `linux/arm64` on
-every push to `main` and pushes them to GHCR under the names the prod
-overlay pulls. The frontend's Node stage is pinned to `$BUILDPLATFORM`, so the
+workflow in `.github/workflows/ci.yml` runs both test suites first and
+**only builds if they pass**, so a red test never reaches the registry.
+It then builds both images for `linux/arm64` and pushes them to GHCR under
+the names the prod overlay pulls. Pull requests run the tests but publish
+nothing. The frontend's Node stage is pinned to `$BUILDPLATFORM`, so the
 bundle is built natively on the x86 runner and only the small nginx stage
 is emulated. Documentation and manifest changes skip the workflow.
 

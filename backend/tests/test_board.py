@@ -17,9 +17,19 @@ from app.sudoku.board import (
     is_complete,
     is_consistent,
     parse_grid,
+    render,
     validate_shape,
 )
-from app.sudoku.puzzles import LEVELS, PUZZLES, random_puzzle
+from app.sudoku.puzzles import (
+    DEFAULT_KEY,
+    DEFAULT_LEVEL,
+    LEVELS,
+    PUZZLES,
+    get,
+    keys,
+    level_keys,
+    random_puzzle,
+)
 
 
 class TestParseGrid:
@@ -200,3 +210,41 @@ class TestLevels:
     def test_an_unknown_level_says_which_ones_exist(self) -> None:
         with pytest.raises(KeyError, match="unknown level"):
             random_puzzle("impossible")
+
+
+class TestRender:
+    def test_draws_box_separators_and_dots_for_blanks(self) -> None:
+        lines = render(empty_grid()).splitlines()
+        assert len(lines) == 11, "nine rows plus two separators"
+        assert lines[0] == ". . . | . . . | . . ."
+        assert lines[3] == "------+-------+------"
+        assert lines[7] == "------+-------+------"
+
+    def test_prints_the_digits_it_was_given(self) -> None:
+        grid = empty_grid()
+        grid[0][0] = 5
+        grid[0][8] = 9
+        assert render(grid).splitlines()[0] == "5 . . | . . . | . . 9"
+
+
+class TestLookup:
+    def test_finds_a_puzzle_by_key(self) -> None:
+        puzzle = get("easy-1")
+        assert puzzle.key == "easy-1"
+        assert puzzle is PUZZLES["easy-1"]
+
+    def test_an_unknown_key_lists_the_real_ones(self) -> None:
+        with pytest.raises(KeyError, match="unknown puzzle"):
+            get("easy-99")
+
+    def test_keys_are_every_puzzle_in_definition_order(self) -> None:
+        assert keys() == list(PUZZLES)
+        assert keys()[0] == "blank", "the empty board comes first"
+
+    def test_level_keys_run_easiest_first(self) -> None:
+        assert level_keys() == ["blank", "easy", "medium", "hard", "evil"]
+
+    def test_the_defaults_point_at_something_real(self) -> None:
+        assert DEFAULT_KEY in PUZZLES
+        assert DEFAULT_LEVEL in LEVELS
+        assert PUZZLES[DEFAULT_KEY].level == DEFAULT_LEVEL
