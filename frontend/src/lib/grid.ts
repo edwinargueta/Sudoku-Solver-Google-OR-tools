@@ -3,7 +3,32 @@
 import type { Conflict, Grid } from '../api/types'
 
 export const SIZE = 9
+export const BOX = 3
 export const EMPTY = 0
+
+/** A position on the board. */
+export interface Cell {
+  row: number
+  col: number
+}
+
+/** Which 3x3 box a cell sits in, numbered left to right, top to bottom. */
+export function boxIndex(row: number, col: number): number {
+  return Math.floor(row / BOX) * BOX + Math.floor(col / BOX)
+}
+
+/**
+ * Whether two cells constrain each other — the same row, column or box.
+ *
+ * These are exactly the cells a digit cannot repeat in, which is what the
+ * board shades when one is selected. A cell is not its own peer.
+ */
+export function isPeer(a: Cell, b: Cell): boolean {
+  if (a.row === b.row && a.col === b.col) return false
+  return (
+    a.row === b.row || a.col === b.col || boxIndex(a.row, a.col) === boxIndex(b.row, b.col)
+  )
+}
 
 /** How a cell is addressed in the DOM and in the highlight sets. */
 export type CellKey = `${number},${number}`

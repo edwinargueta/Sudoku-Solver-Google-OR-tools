@@ -7,6 +7,13 @@ solving, and a React front end lets you watch it happen.
 **Stack:** FastAPI + OR-Tools on the backend, React + TypeScript (Vite) on
 the front end.
 
+**Live at [sudoku-csp.duckdns.org](https://sudoku-csp.duckdns.org/)** — free to
+use, nothing to sign up for. It runs on a single-node k3s cluster on an Oracle
+Cloud Always Free ARM VM, with images built for `linux/arm64` by GitHub Actions
+and a Let's Encrypt certificate issued by cert-manager. The whole thing costs
+nothing to host — [ARCHITECTURE.md](ARCHITECTURE.md) has the diagrams and the
+line-by-line cost breakdown, and [One-time setup](#one-time-setup) has the recipe.
+
 ---
 
 ## Why this repo exists
@@ -38,6 +45,16 @@ is a small, complete example of that shift —
   solutions found.
 - Ships forty sample puzzles across four difficulties, ten apiece, graded by
   the technique each one demands and drawn at random when you pick a level.
+- **Plays like a board, not a form** — the puzzle's clues are read-only, every
+  entry is a move that Undo can take back, and Clear removes your moves while
+  leaving the clues alone.
+- **Shows you the constraints** — selecting a cell shades the twenty others a
+  digit there could clash with: its row, its column and its box. The same three
+  all-different constraints the solver is working with, drawn on the board.
+- **Reachable on a phone** — the difficulty picker sits above the board and
+  Solve, Check Moves, Undo and Clear sit below it, so choosing a puzzle and
+  playing it both happen without scrolling. The settings panel keeps what you
+  touch once.
 
 ---
 
@@ -81,6 +98,7 @@ machine defaults to.
 
 ```
 Sudoku Solver Google OR tools/
+├── ARCHITECTURE.md             # system design, diagrams, why it costs nothing
 ├── .github/workflows/          # tests, then arm64 images pushed to GHCR
 ├── compose.yaml                # nginx + uvicorn, the deployed shape locally
 ├── deploy/k8s/
@@ -108,7 +126,7 @@ Sudoku Solver Google OR tools/
     │   ├── api/types.ts        # the wire contract, mirroring the Pydantic models
     │   ├── hooks/useSudoku.ts  # all board state and API traffic
     │   ├── lib/grid.ts         # pure grid helpers
-    │   └── components/         # SudokuGrid, Toolbar, StatusPanel
+    │   └── components/         # LevelPicker, SudokuGrid, BoardActions, StatusLine, …
     ├── tsconfig.json           # the browser half; no Node types on purpose
     ├── tsconfig.node.json      # vite.config.ts, which does run in Node
     └── vite.config.ts
@@ -209,7 +227,7 @@ make test-backend      # pytest
 make test-frontend     # vitest
 ```
 
-**288 tests**: 223 on the backend with pytest, 65 on the front end with
+**347 tests**: 223 on the backend with pytest, 124 on the front end with
 Vitest. Every file is meant to be able to fail on its own.
 
 | File | Covers |
@@ -218,10 +236,11 @@ Vitest. Every file is meant to be able to fail on its own.
 | `backend/tests/test_solver.py` | model shape, every sample, uniqueness, infeasibility, time limits |
 | `backend/tests/test_api.py` | status codes, payload shapes, 422s, CORS |
 | `backend/tests/test_config.py` | defaults, the `SUDOKU_` prefix, the cached singleton |
-| `frontend/src/lib/grid.test.ts` | the pure grid helpers, including that rows are not aliased |
+| `frontend/src/lib/grid.test.ts` | the pure grid helpers, box arithmetic and peer cells |
 | `frontend/src/api/client.test.ts` | request shapes, and every way a request can fail |
-| `frontend/src/hooks/useSudoku.test.ts` | the state machine: load, edit, solve, check, clear |
-| `frontend/src/components/*.test.tsx` | rendering, typing, arrow keys, disabled states |
+| `frontend/src/hooks/useSudoku.test.ts` | the state machine: load, edit, undo, solve, check, clear |
+| `frontend/src/components/*.test.tsx` | rendering, typing, arrow keys, locked clues, the constraint highlight |
+| `frontend/src/App.test.tsx` | where things live: picker above the board, actions below it |
 
 The solver suite asserts the property that matters: a solution must be a
 complete valid grid **that leaves every given in place**. Every one of the

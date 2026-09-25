@@ -2,9 +2,12 @@ import { useEffect, useState } from 'react'
 
 import { getHealth } from './api/client'
 import type { Health } from './api/types'
-import StatusPanel from './components/StatusPanel'
+import BoardActions from './components/BoardActions'
+import LevelPicker from './components/LevelPicker'
+import SolveStats from './components/SolveStats'
+import SolverOptions from './components/SolverOptions'
+import StatusLine from './components/StatusLine'
 import SudokuGrid from './components/SudokuGrid'
-import Toolbar from './components/Toolbar'
 import { useSudoku } from './hooks/useSudoku'
 
 // The Vite dev server proxies /api only, so the docs link points at uvicorn.
@@ -51,31 +54,41 @@ export default function App() {
 
       <main className="layout">
         <section className="panel panel--board" aria-label="Board">
+          <LevelPicker
+            levels={sudoku.levels}
+            level={sudoku.level}
+            busy={sudoku.busy}
+            onPickLevel={sudoku.loadLevel}
+            onShuffle={sudoku.shuffle}
+          />
           <SudokuGrid
             grid={sudoku.displayGrid}
             givens={sudoku.givens}
+            locked={sudoku.locked}
             conflictedCells={sudoku.conflictedCells}
             readOnly={sudoku.busy}
             onChange={sudoku.updateCell}
           />
+          <BoardActions
+            busy={sudoku.busy}
+            isEmpty={sudoku.isEmpty}
+            canUndo={sudoku.canUndo}
+            onSolve={sudoku.solve}
+            onCheck={sudoku.check}
+            onUndo={sudoku.undo}
+            onClear={sudoku.clear}
+          />
+          <StatusLine status={sudoku.status} />
           <p className="hint">Type 1–9, arrow keys to move, Backspace to clear a cell.</p>
         </section>
 
         <section className="panel" aria-label="Controls">
-          <Toolbar
-            levels={sudoku.levels}
-            level={sudoku.level}
+          <SolverOptions
             busy={sudoku.busy}
-            isEmpty={sudoku.isEmpty}
             checkUnique={sudoku.checkUnique}
-            onPickLevel={sudoku.loadLevel}
-            onShuffle={sudoku.shuffle}
-            onSolve={sudoku.solve}
-            onCheck={sudoku.check}
-            onClear={sudoku.clear}
             onToggleUnique={sudoku.setCheckUnique}
           />
-          <StatusPanel status={sudoku.status} stats={sudoku.stats} />
+          <SolveStats stats={sudoku.stats} />
         </section>
       </main>
 

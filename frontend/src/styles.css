@@ -13,6 +13,11 @@
   --solved: #1f6feb;
   --danger: #c0353a;
   --danger-bg: #fdeaea;
+  --given-bg: #eceff4;
+  --peer-tint: rgb(31 111 235 / 9%);
+  --selected-tint: rgb(31 111 235 / 20%);
+  --grid-line: #d8dce3;
+  --grid-line-strong: #8b94a3;
   --ok: #1a7f4b;
   --warn: #9a6700;
   --radius: 10px;
@@ -35,6 +40,11 @@
     --solved: #4d9bff;
     --danger: #ff6b6b;
     --danger-bg: #3a1d1f;
+    --given-bg: #1e242f;
+    --peer-tint: rgb(77 155 255 / 12%);
+    --selected-tint: rgb(77 155 255 / 24%);
+    --grid-line: #2b313c;
+    --grid-line-strong: #6b7484;
     --ok: #4ec98a;
     --warn: #e3b341;
     --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 8px 24px rgb(0 0 0 / 30%);
@@ -115,6 +125,52 @@ body {
   .layout {
     grid-template-columns: 1fr;
   }
+
+  /* Four across is too narrow to read at phone width; two rows of two keeps
+     every label intact and every target wide. */
+  .board-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* The picker earns its place above the grid by staying one line. Its
+     description is the first thing to go: ~30px here is ~30px the action row
+     loses, and on a 667px phone that margin is already thin. */
+  .level-picker .field__hint {
+    display: none;
+  }
+
+  /* Reclaiming vertical space is what puts the actions above the fold. Trim
+     the gaps, not .panel's padding: narrowing the panel widens the board, and
+     aspect-ratio: 1 makes it taller by the same amount, so that one loses. */
+  .app {
+    padding: 8px 12px 24px;
+  }
+
+  .header {
+    margin-bottom: 8px;
+  }
+
+  .panel--board {
+    gap: 8px;
+  }
+
+  /* Arrow keys and Backspace are desktop advice; on a touch screen the line
+     costs a row of pixels and tells the reader nothing. */
+  .panel--board .hint {
+    display: none;
+  }
+
+  .header__title {
+    font-size: 1.25rem;
+  }
+
+  .header__subtitle {
+    display: none;
+  }
+
+  .panel {
+    padding: 12px;
+  }
 }
 
 .panel {
@@ -133,22 +189,28 @@ body {
 
 /* --- board ------------------------------------------------------------- */
 
+/* Every line on the board is drawn by a cell's own border, so there is one
+   mechanism rather than three: 1px between cells, 2px where the boxes meet,
+   and the frame matching the box lines. The grid itself draws nothing. */
+
 .grid {
   display: grid;
   grid-template-columns: repeat(9, minmax(0, 1fr));
   width: min(100%, 432px);
   aspect-ratio: 1;
-  border: 2px solid var(--border-strong);
+  border: 2px solid var(--grid-line-strong);
   border-radius: 6px;
   overflow: hidden;
-  background: var(--border);
-  gap: 1px;
+  background: var(--surface);
 }
 
 .cell {
+  box-sizing: border-box;
   border: 0;
+  border-right: 1px solid var(--grid-line);
+  border-bottom: 1px solid var(--grid-line);
   outline: 0;
-  background: var(--surface);
+  background-color: var(--surface);
   color: var(--solved);
   font-size: clamp(1rem, 4vw, 1.4rem);
   font-weight: 500;
@@ -158,23 +220,27 @@ body {
   caret-color: var(--accent);
 }
 
-.cell:focus {
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+/* The last column and row stop at the frame instead of doubling it. */
+.cell:nth-child(9n) {
+  border-right: 0;
 }
 
+.cell:nth-child(n + 73) {
+  border-bottom: 0;
+}
+
+/* Where two boxes meet: same line, twice as wide and a shade darker. */
 .cell--box-right {
-  box-shadow: 2px 0 0 var(--border-strong);
-  clip-path: inset(0 -2px 0 0);
+  border-right: 2px solid var(--grid-line-strong);
 }
 
 .cell--box-bottom {
-  box-shadow: 0 2px 0 var(--border-strong);
-  clip-path: inset(0 0 -2px 0);
+  border-bottom: 2px solid var(--grid-line-strong);
 }
 
-.cell--box-right.cell--box-bottom {
-  box-shadow: 2px 0 0 var(--border-strong), 0 2px 0 var(--border-strong);
-  clip-path: inset(0 -2px -2px 0);
+/* The puzzle's own clues, told apart from anything typed in. */
+.cell--locked {
+  background-color: var(--given-bg);
 }
 
 .cell--given {
@@ -182,34 +248,66 @@ body {
   font-weight: 700;
 }
 
+/* A clue is still focusable, so the caret would otherwise invite an edit
+   that the input will refuse. */
+.cell[readonly] {
+  cursor: default;
+  caret-color: transparent;
+}
+
+/* The cells a digit may not repeat in: the row, the column and the box, with
+   the selected cell a shade stronger. These tint over whatever the cell's
+   background already is, so a clue stays recognisable while it is shaded. */
+.cell--peer {
+  background-image: linear-gradient(var(--peer-tint), var(--peer-tint));
+}
+
+.cell--selected {
+  background-image: linear-gradient(var(--selected-tint), var(--selected-tint));
+}
+
+/* A clash outranks both, so it is last. */
 .cell--conflict {
-  background: var(--danger-bg);
+  background-color: var(--danger-bg);
   color: var(--danger);
+}
+
+/* Keyboard focus needs a ring of its own: the selected shading is also what a
+   mouse click produces, and it is too quiet to serve as a focus indicator. */
+.cell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.level-picker {
+  display: grid;
+  gap: 6px;
+  width: min(100%, 432px);
+}
+
+/* Matches the board's own width expression so the two line up exactly. An
+   explicit grid rather than flex-wrap: wrapping would strand Clear alone on a
+   full-width row, making the irreversible action the largest target here. */
+.board-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  width: min(100%, 432px);
+}
+
+/* .button computes to 42px; this clears the 44px touch-target minimum. */
+.board-actions .button {
+  min-height: 44px;
 }
 
 .hint {
   margin: 0;
   color: var(--text-muted);
   font-size: 0.85rem;
+  text-align: center;
 }
 
-/* --- toolbar ----------------------------------------------------------- */
-
-.toolbar {
-  display: grid;
-  gap: 16px;
-}
-
-.toolbar__row--buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.field {
-  display: grid;
-  gap: 6px;
-}
+/* --- controls ---------------------------------------------------------- */
 
 .field__inline {
   display: flex;
@@ -228,13 +326,6 @@ body {
 .field__hint {
   color: var(--text-muted);
   font-size: 0.78rem;
-}
-
-.field__label {
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
 }
 
 .select,
@@ -289,15 +380,11 @@ body {
 
 /* --- status ------------------------------------------------------------ */
 
-.status {
-  margin-top: 20px;
-  border-top: 1px solid var(--border);
-  padding-top: 16px;
-}
-
 .status__message {
   margin: 0;
+  width: min(100%, 432px);
   font-size: 0.925rem;
+  text-align: center;
 }
 
 .status__message--idle {
@@ -317,7 +404,9 @@ body {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  margin: 16px 0 0;
+  margin: 20px 0 0;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
 }
 
 .stats__item dt {

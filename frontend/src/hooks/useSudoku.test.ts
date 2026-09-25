@@ -231,7 +231,35 @@ describe('checking', () => {
 })
 
 describe('clear', () => {
-  it('puts everything back to where it started', async () => {
+  it('takes back the moves but leaves the givens on the board', async () => {
+    const { result } = await mount()
+    await act(async () => {
+      await result.current.loadLevel('easy')
+    })
+    act(() => result.current.updateCell(4, 4, 8))
+    expect(result.current.grid[4][4]).toBe(8)
+
+    act(() => result.current.clear())
+
+    expect(result.current.grid[4][4], 'the move is gone').toBe(0)
+    expect(result.current.grid[0][0]).toBe(5)
+    expect(result.current.givens.has('0,0')).toBe(true)
+    expect(result.current.isEmpty).toBe(false)
+  })
+
+  it('restores a given the player had typed over', async () => {
+    const { result } = await mount()
+    await act(async () => {
+      await result.current.loadLevel('easy')
+    })
+    act(() => result.current.updateCell(0, 0, 2))
+    expect(result.current.grid[0][0]).toBe(2)
+
+    act(() => result.current.clear())
+    expect(result.current.grid[0][0]).toBe(5)
+  })
+
+  it('drops a displayed solution and the statistics with it', async () => {
     vi.mocked(solvePuzzle).mockResolvedValue(solved())
     const { result } = await mount()
     await act(async () => {
@@ -240,12 +268,157 @@ describe('clear', () => {
     await act(async () => {
       await result.current.solve()
     })
-    act(() => result.current.clear())
+    expect(result.current.solution).not.toBeNull()
 
-    expect(result.current.isEmpty).toBe(true)
-    expect(result.current.givens.size).toBe(0)
+    act(() => result.current.clear())
     expect(result.current.solution).toBeNull()
     expect(result.current.stats).toBeNull()
     expect(result.current.status.kind).toBe('idle')
+  })
+
+  it('empties a board that was typed from scratch', async () => {
+    const { result } = await mount()
+    act(() => result.current.updateCell(3, 3, 6))
+    act(() => result.current.clear())
+    expect(result.current.isEmpty).toBe(true)
+    expect(result.current.givens.size).toBe(0)
+  })
+
+  it('forgets the move history', async () => {
+    const { result } = await mount()
+    act(() => result.current.updateCell(3, 3, 6))
+    expect(result.current.canUndo).toBe(true)
+    act(() => result.current.clear())
+    expect(result.current.canUndo).toBe(false)
+  })
+})
+
+describe('locked cells', () => {
+  it('are the puzzle\'s clues once one is dealt', async () => {
+    const { result } = await mount()
+    expect(result.current.locked.size).toBe(0)
+    await act(async () => {
+      await result.current.loadLevel('easy')
+    })
+    expect(result.current.locked.has('0,0')).toBe(true)
+    expect(result.current.locked.has('4,4')).toBe(false)
+  })
+
+  it('do not grow as the player fills the board in', async () => {
+    const { result } = await mount()
+    await act(async () => {
+      await result.current.loadLevel('easy')
+    })
+    act(() => result.current.updateCell(4, 4, 8))
+    expect(result.current.locked.has('4,4')).toBe(false)
+  })
+
+  it('stay put through a solve, which rewrites the styling set', async () => {
+    vi.mocked(solvePuzzle).mockResolvedValue(solved())
+    const { result } = await mount()
+    await act(async () => {
+      await result.current.loadLevel('easy')
+    })
+    act(() => result.current.updateCell(4, 4, 8))
+    await act(async () => {
+      await result.current.solve()
+    })
+    // `givens` now describes what was typed; the lock must not follow it.
+    expect(result.current.givens.has('4,4')).toBe(true)
+    expect(result.current.locked.has('4,4')).toBe(false)
+  })
+
+  it('are empty for a board typed from scratch', async () => {
+    const { result } = await mount()
+    act(() => result.current.updateCell(0, 0, 1))
+    expect(result.current.locked.size).toBe(0)
+  })
+})
+
+describe('undo', () => {
+  it('is unavailable until something has been typed', async () => {
+    const { result } = await mount()
+    expect(result.current.canUndo).toBe(false)
+  })
+
+  it('takes back the last move', async () => {
+    const { result } = await mount()
+    act(() => result.current.updateCell(2, 2, 4))
+    act(() => result.current.undo())
+    expect(result.current.grid[2][2]).toBe(0)
+    expect(result.current.canUndo).toBe(false)
+  })
+
+  it('restores what the cell held before, not just an empty cell', async () => {
+    const { result } = await mount()
+    act(() => result.current.updateCell(2, 2, 4))
+    act(() => result.current.updateCell(2, 2, 9))
+    act(() => result.current.undo())
+    expect(result.current.grid[2][2]).toBe(4)
+  })
+
+  it('walks back one move at a time', async () => {
+    const { result } = await mount()
+    act(() => result.current.updateCell(0, 1, 1))
+    act(() => result.current.updateCell(0, 2, 2))
+    act(() => result.current.updateCell(0, 3, 3))
+
+    act(() => result.current.undo())
+    expect(result.current.grid[0][3]).toBe(0)
+    expect(result.current.grid[0][2]).toBe(2)
+
+    act(() => result.current.undo())
+    act(() => result.current.undo())
+    expect(result.current.grid[0][1]).toBe(0)
+    expect(result.current.canUndo).toBe(false)
+  })
+
+  it('does nothing when there is nothing to take back', async () => {
+    const { result } = await mount()
+    act(() => result.current.undo())
+    expect(result.current.isEmpty).toBe(true)
+  })
+
+  it('never undoes a given away', async () => {
+    const { result } = await mount()
+    await act(async () => {
+      await result.current.loadLevel('easy')
+    })
+    expect(result.current.canUndo, 'dealing is not a move').toBe(false)
+    act(() => result.current.undo())
+    expect(result.current.grid[0][0]).toBe(5)
+  })
+
+  it('does not count retyping the same digit as a move', async () => {
+    const { result } = await mount()
+    act(() => result.current.updateCell(5, 5, 7))
+    act(() => result.current.updateCell(5, 5, 7))
+    act(() => result.current.undo())
+    expect(result.current.grid[5][5]).toBe(0)
+    expect(result.current.canUndo).toBe(false)
+  })
+
+  it('starts fresh when a new puzzle is dealt', async () => {
+    const { result } = await mount()
+    act(() => result.current.updateCell(1, 1, 3))
+    expect(result.current.canUndo).toBe(true)
+    await act(async () => {
+      await result.current.loadLevel('easy')
+    })
+    expect(result.current.canUndo).toBe(false)
+  })
+
+  it('clears a displayed solution, since the board changed underneath it', async () => {
+    vi.mocked(solvePuzzle).mockResolvedValue(solved())
+    const { result } = await mount()
+    act(() => result.current.updateCell(0, 0, 3))
+    await act(async () => {
+      await result.current.solve()
+    })
+    expect(result.current.solution).not.toBeNull()
+
+    act(() => result.current.undo())
+    expect(result.current.solution).toBeNull()
+    expect(result.current.stats).toBeNull()
   })
 })

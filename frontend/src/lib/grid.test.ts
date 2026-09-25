@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import type { Conflict } from '../api/types'
 import {
+  BOX,
   EMPTY,
   SIZE,
+  boxIndex,
   cellKey,
   cloneGrid,
   conflictKeys,
@@ -11,6 +13,7 @@ import {
   emptyGrid,
   givenKeys,
   gridsEqual,
+  isPeer,
   setCell,
 } from './grid'
 
@@ -106,5 +109,58 @@ describe('conflictKeys', () => {
 
   it('defaults to nothing highlighted', () => {
     expect(conflictKeys().size).toBe(0)
+  })
+})
+
+describe('boxIndex', () => {
+  it('numbers the boxes left to right, top to bottom', () => {
+    expect(boxIndex(0, 0)).toBe(0)
+    expect(boxIndex(0, 8)).toBe(2)
+    expect(boxIndex(4, 4)).toBe(4)
+    expect(boxIndex(8, 8)).toBe(8)
+  })
+
+  it('gives every cell of a box the same number', () => {
+    const corner = boxIndex(3, 3)
+    for (let r = 3; r < 3 + BOX; r += 1) {
+      for (let c = 3; c < 3 + BOX; c += 1) {
+        expect(boxIndex(r, c)).toBe(corner)
+      }
+    }
+  })
+})
+
+describe('isPeer', () => {
+  const selected = { row: 4, col: 4 }
+
+  it('counts the rest of the row', () => {
+    expect(isPeer(selected, { row: 4, col: 0 })).toBe(true)
+    expect(isPeer(selected, { row: 4, col: 8 })).toBe(true)
+  })
+
+  it('counts the rest of the column', () => {
+    expect(isPeer(selected, { row: 0, col: 4 })).toBe(true)
+    expect(isPeer(selected, { row: 8, col: 4 })).toBe(true)
+  })
+
+  it('counts the rest of the box', () => {
+    expect(isPeer(selected, { row: 3, col: 3 })).toBe(true)
+    expect(isPeer(selected, { row: 5, col: 5 })).toBe(true)
+  })
+
+  it('leaves unrelated cells alone', () => {
+    expect(isPeer(selected, { row: 0, col: 0 })).toBe(false)
+    expect(isPeer(selected, { row: 8, col: 0 })).toBe(false)
+    expect(isPeer(selected, { row: 2, col: 7 })).toBe(false)
+  })
+
+  it('does not make a cell its own peer', () => {
+    expect(isPeer(selected, selected)).toBe(false)
+  })
+
+  it('is symmetric', () => {
+    const a = { row: 1, col: 7 }
+    const b = { row: 1, col: 2 }
+    expect(isPeer(a, b)).toBe(isPeer(b, a))
   })
 })

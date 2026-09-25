@@ -4,6 +4,10 @@
  * The board the user edits is `grid`. A solve does not overwrite it: the result
  * lands in `solution`, and `displayGrid` merges the two so solved cells can be
  * styled differently from what was typed.
+ *
+ * `dealt` is the board as it arrived from the server, which is what Clear goes
+ * back to — the givens are not the player's to erase. Every edit is recorded in
+ * `history` so the last one can be taken back.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -11,7 +15,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getRandomPuzzle, listLevels, solvePuzzle, validateGrid } from '../api/client'
 import type { Conflict, Grid, Level, Puzzle, SolveResponse } from '../api/types'
 import type { CellKey } from '../lib/grid'
-import { EMPTY, cloneGrid, conflictKeys, emptyGrid, givenKeys, setCell } from '../lib/grid'
+import {
+  EMPTY,
+  cloneGrid,
+  conflictKeys,
+  countFilled,
+  emptyGrid,
+  givenKeys,
+  setCell,
+} from '../lib/grid'
 
 /** How the status line is coloured, and what it says. */
 export type StatusKind = 'idle' | 'ok' | 'warn' | 'error'
@@ -19,6 +31,13 @@ export type StatusKind = 'idle' | 'ok' | 'warn' | 'error'
 export interface Status {
   kind: StatusKind
   message: string
+}
+
+/** One edit, with what the cell held before, which is all undo needs. */
+interface Move {
+  row: number
+  col: number
+  previous: number
 }
 
 const IDLE: Status = { kind: 'idle', message: 'Type a puzzle, or pick a difficulty.' }
@@ -30,6 +49,8 @@ function messageOf(error: unknown): string {
 
 export function useSudoku() {
   const [grid, setGrid] = useState<Grid>(emptyGrid)
+  const [dealt, setDealt] = useState<Grid>(emptyGrid)
+  const [history, setHistory] = useState<Move[]>([])
   const [givens, setGivens] = useState<Set<CellKey>>(() => new Set())
   const [solution, setSolution] = useState<Grid | null>(null)
   const [conflicts, setConflicts] = useState<Conflict[]>([])
@@ -58,17 +79,48 @@ export function useSudoku() {
 
   const conflictedCells = useMemo(() => conflictKeys(conflicts), [conflicts])
 
-  /** Editing anywhere invalidates the displayed solution. */
-  const updateCell = useCallback((row: number, col: number, value: number) => {
+  /**
+   * The puzzle's own clues, which the player may not type over.
+   *
+   * Deliberately not `givens`: a solve rewrites that set to whatever was typed,
+   * so keying the lock off it would freeze the player's own entries instead.
+   */
+  const locked = useMemo(() => givenKeys(dealt), [dealt])
+
+  /** Editing anywhere invalidates the displayed solution, and counts as a move. */
+  const updateCell = useCallback(
+    (row: number, col: number, value: number) => {
+      const previous = grid[row][col]
+      if (previous === value) return // retyping the same digit is not a move
+
+      setHistory((past) => [...past, { row, col, previous }])
+      setSolution(null)
+      setConflicts([])
+      setStats(null)
+      setStatus(IDLE)
+      setGrid(setCell(grid, row, col, value))
+    },
+    [grid],
+  )
+
+  /** Put the last edit back. Only the player's moves are recorded, so a given
+   *  can never be undone away. */
+  const undo = useCallback(() => {
+    const last = history[history.length - 1]
+    if (!last) return
+
+    setHistory((past) => past.slice(0, -1))
     setSolution(null)
     setConflicts([])
     setStats(null)
-    setStatus(IDLE)
-    setGrid((current) => setCell(current, row, col, value))
-  }, [])
+    setGrid((current) => setCell(current, last.row, last.col, last.previous))
+    setStatus({ kind: 'idle', message: `Took back r${last.row + 1}c${last.col + 1}.` })
+  }, [history])
 
   const loadPuzzle = useCallback((puzzle: Puzzle) => {
     setGrid(cloneGrid(puzzle.grid))
+    setDealt(cloneGrid(puzzle.grid))
+    setHistory([])
     setGivens(givenKeys(puzzle.grid))
     setSolution(null)
     setConflicts([])
@@ -97,14 +149,20 @@ export function useSudoku() {
     if (level) void loadLevel(level)
   }, [level, loadLevel])
 
+  /** Take back every move, leaving the puzzle exactly as it was dealt. */
   const clear = useCallback(() => {
-    setGrid(emptyGrid())
-    setGivens(new Set())
+    setGrid(cloneGrid(dealt))
+    setGivens(givenKeys(dealt))
+    setHistory([])
     setSolution(null)
     setConflicts([])
     setStats(null)
-    setStatus(IDLE)
-  }, [])
+    setStatus(
+      countFilled(dealt) > 0
+        ? { kind: 'idle', message: 'Cleared your moves; the givens are still there.' }
+        : IDLE,
+    )
+  }, [dealt])
 
   const solve = useCallback(async () => {
     setBusy(true)
@@ -175,6 +233,7 @@ export function useSudoku() {
     grid,
     displayGrid,
     givens,
+    locked,
     solution,
     conflictedCells,
     status,
@@ -185,6 +244,8 @@ export function useSudoku() {
     checkUnique,
     setCheckUnique,
     updateCell,
+    undo,
+    canUndo: history.length > 0,
     loadLevel,
     shuffle,
     clear,
