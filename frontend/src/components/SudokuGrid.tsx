@@ -148,22 +148,23 @@ export default function SudokuGrid({
       event.preventDefault()
       if (readOnly || locked.has(cellKey(row, col))) return
       onChange(row, col, EMPTY)
-      return
-    }
-    // A touch screen selects nothing on focus, so a tablet's keyboard would
-    // type 7 in front of a 5 and leave the 5; there a digit replaces the cell
-    // outright. A desktop keeps the browser's own typing, and its Cmd+Z.
-    if (touch && /^[1-9]$/.test(event.key) && !event.metaKey && !event.ctrlKey && !event.altKey) {
-      event.preventDefault()
-      if (readOnly || locked.has(cellKey(row, col))) return
-      onChange(row, col, Number(event.key))
     }
   }
 
-  // Typing replaces the cell rather than appending, so 5 then 7 leaves a 7.
+  // Typing replaces the cell rather than appending, so 5 then 7 leaves a 7,
+  // whichever side of the 5 the caret was on. That cannot be left to the
+  // selection made on focus: a touch screen makes none, and Safari's mouse-up
+  // can undo it and leave the caret in front of the old digit. Anything that
+  // is not 1-9 is ignored, and the cell keeps what it had.
   function handleChange(event: ChangeEvent<HTMLInputElement>, row: number, col: number): void {
-    const typed = event.target.value.replace(/[^1-9]/g, '').slice(-1)
-    onChange(row, col, typed === '' ? EMPTY : Number(typed))
+    const text = event.target.value
+    if (text === '') {
+      onChange(row, col, EMPTY)
+      return
+    }
+    const before = grid[row][col] === EMPTY ? '' : String(grid[row][col])
+    const typed = text.replace(before, '').replace(/[^1-9]/g, '').slice(-1)
+    if (typed !== '') onChange(row, col, Number(typed))
   }
 
   return (

@@ -2,3 +2,11 @@ node_modules/
 dist/
 .env
 .env.local
+
+# The browser tests never run in the image. Left in, an edit to one would
+# invalidate the build's COPY layer and rebuild the bundle for nothing.
+e2e/
+playwright.config.ts
+test-results/
+playwright-report/
+blob-report/

@@ -60,7 +60,7 @@ is a small, complete example of that shift —
 
 ## Quickstart
 
-Requires **Python 3.11+** and **Node 18+**.
+Requires **Python 3.11+** and **Node 24+** (`frontend/.nvmrc`; `nvm use` in `frontend/` picks it up).
 
 ```bash
 make setup     # venv + backend deps + npm install
@@ -120,6 +120,7 @@ Sudoku Solver Google OR tools/
 └── frontend/
     ├── Dockerfile              # Vite build, then nginx serves the bundle
     ├── nginx.conf.template     # SPA fallback + same-origin /api proxy
+    ├── .nvmrc                  # the Node version, for nvm and for CI
     ├── src/
     │   ├── App.tsx
     │   ├── api/client.ts       # fetch wrapper, one place for errors
@@ -127,6 +128,8 @@ Sudoku Solver Google OR tools/
     │   ├── hooks/useSudoku.ts  # all board state and API traffic
     │   ├── lib/grid.ts         # pure grid helpers
     │   └── components/         # LevelPicker, SudokuGrid, BoardActions, StatusLine, …
+    ├── e2e/                    # browser tests: desktop and phones, real API
+    ├── playwright.config.ts    # the four browser projects and their servers
     ├── tsconfig.json           # the browser half; no Node types on purpose
     ├── tsconfig.node.json      # vite.config.ts, which does run in Node
     └── vite.config.ts
@@ -222,13 +225,16 @@ the event loop.
 ## Tests
 
 ```bash
-make test              # both suites
+make test              # both unit suites
 make test-backend      # pytest
 make test-frontend     # vitest
+make e2e               # browser tests, desktop and phones
 ```
 
-**347 tests**: 223 on the backend with pytest, 124 on the front end with
-Vitest. Every file is meant to be able to fail on its own.
+**385 unit tests**: 223 on the backend with pytest, 162 on the front end with
+Vitest. On top of those, **30 browser tests** make 59 runs across four device
+projects in two engines, with Playwright. Every file is meant to be able to
+fail on its own.
 
 | File | Covers |
 |---|---|
@@ -241,6 +247,9 @@ Vitest. Every file is meant to be able to fail on its own.
 | `frontend/src/hooks/useSudoku.test.ts` | the state machine: load, edit, undo, solve, check, clear |
 | `frontend/src/components/*.test.tsx` | rendering, typing, arrow keys, locked clues, the constraint highlight |
 | `frontend/src/App.test.tsx` | where things live: picker above the board, actions below it |
+| `frontend/e2e/game.spec.ts` | a game against the real API: dealing and Check Moves on every device; solving and contradictions on desktop and iPhone |
+| `frontend/e2e/desktop/*.spec.ts` | the keyboard in Chrome and Safari, native undo, the desktop layout |
+| `frontend/e2e/touch/*.spec.ts` | the number pad with real taps, and the board and pad fitting on each phone |
 
 The solver suite asserts the property that matters: a solution must be a
 complete valid grid **that leaves every given in place**. Every one of the
@@ -251,6 +260,68 @@ The front-end tests mock `fetch` and the API client rather than starting a
 server, so `make test` needs nothing running. Component tests drive the
 board the way a person does — typing a digit, pressing Backspace, walking
 the grid with arrow keys — instead of reaching for internals.
+
+### Browser tests
+
+jsdom has no stylesheet, no real taps and no API, so the browser tests cover
+what the unit tests cannot: the layout on each screen, touch and focus in a
+real engine, and whether the UI and the FastAPI schemas actually agree.
+`make e2e` builds the bundle that ships, starts uvicorn and `vite preview` on
+ports of their own (8001 and 4180, so `make dev` can keep running), and plays
+against the real solver. The only thing stubbed is the random draw, pinned to
+each level's first puzzle so a test knows where the clues are.
+
+| Project | Browser | Stands in for |
+|---|---|---|
+| `desktop` | Chromium, 1280×720 | a mouse and keyboard |
+| `desktop-safari` | WebKit, 1280×720 | Safari's own quirks with the caret and mouse-up |
+| `iphone` | WebKit, 375×548 | an iPhone SE, at Safari's visible height with both toolbars |
+| `android` | Chromium, 360px wide | the narrowest common phone |
+
+Files in `e2e/desktop/` run only on the first two, files in `e2e/touch/` only
+on the phones, and the rest on all four. A test tagged `@any-engine` checks
+something the browser engine cannot change — the API contract, another
+iPhone's screen size — so it runs on `desktop` and `iphone` only. Layout
+checks compare elements with each other rather than with fixed pixels,
+because fonts differ between macOS and the Linux CI runner. There are no
+screenshot baselines to keep up to date.
+
+Once, after `make setup`, and again after each Playwright upgrade:
+
+```bash
+make e2e-install       # Chromium and WebKit, about 850 MB on disk
+```
+
+Playwright needs Node 20 or later, so run `nvm use` in `frontend/` first, or
+make 24 the default with `nvm alias default 24`.
+
+```bash
+make e2e E2E_ARGS="--project=iphone touch/"   # one project, one folder
+make e2e E2E_ARGS="--grep @smoke"             # the few that prove it works at all
+make e2e-ui            # UI mode: watch, pick a test, step through it
+make e2e-report        # the report from the last run
+```
+
+**When CI fails and your laptop does not.** Every failed run uploads a
+`playwright-report` artifact with a trace and a screenshot for each failure.
+Download it and open it with `npx playwright show-report playwright-report.zip`.
+To get closer to the runner locally, `make e2e-linux` starts the browsers in
+Playwright's Ubuntu 24.04 image (Docker needed) — the release CI runs on, with
+the same browser builds — while the tests and servers stay on your machine.
+
+**What no browser test can see.** An emulated iPhone has no software
+keyboard, no edit menu and no VoiceOver, so the tests check what those
+depend on: every cell asks for no keyboard, a second tap on a chosen cell is
+cancelled, the announcement text is right. After a change to the touch code,
+check these by hand on a real iPhone:
+
+1. Tapping a cell brings up no keyboard.
+2. Tapping the chosen cell again shows no Paste or AutoFill menu.
+3. Tapping a cell in the top or bottom row does not make the page jump.
+4. Two quick taps on a key enter two digits and do not zoom.
+5. On its side, the board and the pad are both on screen once the board is
+   scrolled up, with Safari's toolbars showing and hidden.
+6. With VoiceOver on, each key press is read out.
 
 ---
 
@@ -284,8 +355,8 @@ kubectl -n sudoku-dev rollout restart deploy/api deploy/web
 ```
 
 Neither `make test` nor `make lint` needs any of this running, which is why
-they are the check worth doing before a commit — and they are exactly what
-CI runs before it will build an image.
+they are the check worth doing before a commit. CI runs them, and the
+browser tests, before it will build an image.
 
 ---
 
@@ -360,13 +431,14 @@ Traefik  ──▶  https://<your host>        certificate from cert-manager
 ```
 
 Everything above the cluster is automatic; the rollout is not. The
-workflow in `.github/workflows/ci.yml` runs both test suites first and
-**only builds if they pass**, so a red test never reaches the registry.
+workflow in `.github/workflows/ci.yml` runs every test suite first — pytest,
+Vitest and the browser tests — and **only builds if they all pass**, so a
+red test never reaches the registry.
 It then builds both images for `linux/arm64` and pushes them to GHCR under
 the names the prod overlay pulls. Pull requests run the tests but publish
 nothing. The frontend's Node stage is pinned to `$BUILDPLATFORM`, so the
 bundle is built natively on the x86 runner and only the small nginx stage
-is emulated. Documentation and manifest changes skip the workflow.
+is emulated.
 
 The repository is public, so Actions minutes are free and the packages can
 be public too — which is why no pull secret appears anywhere in
@@ -490,5 +562,6 @@ cp frontend/.env.example frontend/.env.local
 - [ ] Variants: diagonal, killer, hyper — each is a handful of extra constraints
 - [x] Containers for both halves, and kustomize overlays to deploy them
 - [x] Build and publish arm64 images from CI on every push to `main`
+- [x] Browser tests on desktop and phones, run by CI before an image is built
 - [ ] Have the cluster pull new images by itself, rather than a rollout restart
 - [ ] Import a puzzle from a photo

@@ -4,7 +4,7 @@
 # $BUILDPLATFORM pins this stage to the machine doing the building. The output
 # is JavaScript and CSS — no architecture in it — so cross-building for arm64
 # emulates only the nginx stage instead of the whole npm install.
-FROM --platform=$BUILDPLATFORM node:20-alpine AS build
+FROM --platform=$BUILDPLATFORM node:24-alpine AS build
 
 WORKDIR /src
 COPY package.json package-lock.json .npmrc ./

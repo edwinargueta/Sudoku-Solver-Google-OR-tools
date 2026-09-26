@@ -187,10 +187,12 @@ flowchart LR
 
     subgraph gha["GitHub Actions · ci.yml"]
         BT["backend tests<br/>ruff + 223 pytest"]
-        FT["frontend tests<br/>eslint + tsc + 124 vitest"]
+        FT["frontend tests<br/>eslint + tsc + 162 vitest"]
+        E2E["browser tests<br/>Playwright · desktop + phones"]
         BLD["build and push<br/>linux/arm64"]
         BT --> BLD
         FT --> BLD
+        E2E --> BLD
     end
 
     GHCR[("GHCR<br/>sudoku-backend:latest<br/>sudoku-frontend:latest<br/>+ commit sha")]
@@ -198,13 +200,15 @@ flowchart LR
 
     DEV --> BT
     DEV --> FT
+    DEV --> E2E
     BLD --> GHCR
     GHCR -. "pulled on rollout" .-> K3S
     OP(["kubectl rollout restart"]) --> K3S
 ```
 
 **A red test never reaches the registry.** The build job declares
-`needs: [backend, frontend]`, so it does not start until both suites pass.
+`needs: [backend, frontend, e2e]`, so it does not start until every suite
+passes, the browser tests included.
 Pull requests run the tests and publish nothing.
 
 **Images must be `linux/arm64`.** The free Ampere VM is ARM; an amd64 image

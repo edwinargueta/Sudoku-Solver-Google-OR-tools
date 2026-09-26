@@ -95,8 +95,32 @@ describe('typing', () => {
   it('ignores anything that is not 1 to 9', async () => {
     const user = userEvent.setup()
     const { onChange } = renderGrid()
+    await user.type(cell(0, 0), 'a0')
+    expect(onChange).not.toHaveBeenCalled()
+    expect(cell(0, 0).value).toBe('')
+  })
+
+  it('keeps the digit when a letter is typed over it', async () => {
+    const user = userEvent.setup()
+    const grid = emptyBoard()
+    grid[0][0] = 5
+    const { onChange } = renderGrid({ grid })
     await user.type(cell(0, 0), 'a')
-    expect(onChange).toHaveBeenCalledWith(0, 0, 0)
+    expect(onChange).not.toHaveBeenCalled()
+    expect(cell(0, 0).value).toBe('5')
+  })
+
+  // Safari's mouse-up can undo the selection made on focus and leave the caret
+  // in front of the digit, so the new digit arrives first: 7 typed before a 5.
+  it('replaces the digit when the caret sits in front of it', async () => {
+    const user = userEvent.setup()
+    const grid = emptyBoard()
+    grid[0][0] = 5
+    const { onChange } = renderGrid({ grid })
+    act(() => cell(0, 0).focus())
+    cell(0, 0).setSelectionRange(0, 0)
+    await user.keyboard('7')
+    expect(onChange).toHaveBeenLastCalledWith(0, 0, 7)
   })
 
   it('keeps the last digit rather than appending', async () => {
@@ -498,16 +522,6 @@ describe('on a touch screen', () => {
     const { onChange } = renderGrid()
     await user.type(cell(6, 6), '8')
     expect(onChange).toHaveBeenCalledWith(6, 6, 8)
-  })
-
-  it('leaves a shortcut such as Cmd+1 to the browser', () => {
-    useTouchScreen()
-    const { onChange } = renderGrid()
-    act(() => cell(0, 0).focus())
-    // fireEvent returns true when nothing called preventDefault.
-    expect(fireEvent.keyDown(cell(0, 0), { key: '1', metaKey: true })).toBe(true)
-    expect(fireEvent.keyDown(cell(0, 0), { key: '1', ctrlKey: true })).toBe(true)
-    expect(onChange).not.toHaveBeenCalled()
   })
 
   // Nothing is selected on focus here, so the caret can sit in front of a digit.
