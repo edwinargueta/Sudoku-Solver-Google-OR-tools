@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -28,6 +28,19 @@ function renderGrid(overrides: Partial<Parameters<typeof SudokuGrid>[0]> = {}) {
 /** The input for one cell, found the way the component labels it. */
 function cell(row: number, col: number): HTMLInputElement {
   return screen.getByLabelText(`row ${row + 1} column ${col + 1}`) as HTMLInputElement
+}
+
+/** Pretend the primary pointer is a finger, which is what brings out the pad. */
+function useTouchScreen(): void {
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
+  )
+}
+
+function padKey(name: string): HTMLButtonElement {
+  const pad = screen.getByRole('group', { name: 'Number pad' })
+  return within(pad).getByRole('button', { name }) as HTMLButtonElement
 }
 
 describe('rendering', () => {
@@ -284,5 +297,229 @@ describe('arrow keys', () => {
     expect(document.activeElement).toBe(cell(0, 0))
     await user.keyboard('{ArrowLeft}')
     expect(document.activeElement).toBe(cell(0, 0))
+  })
+})
+
+describe('with a mouse and keyboard', () => {
+  it('asks for the numeric keyboard and draws no pad', () => {
+    renderGrid()
+    expect(cell(0, 0).inputMode).toBe('numeric')
+    expect(screen.queryByRole('group', { name: 'Number pad' })).toBeNull()
+  })
+
+  // A touch laptop reports a fine pointer; its taps must still reach the cell,
+  // or tapping the focused cell could not bring the on-screen keyboard back.
+  it('leaves taps and clicks on a cell alone', () => {
+    renderGrid()
+    act(() => cell(4, 4).focus())
+    // fireEvent returns true when nothing called preventDefault.
+    expect(fireEvent.touchEnd(cell(4, 4))).toBe(true)
+    expect(fireEvent.mouseDown(cell(4, 4))).toBe(true)
+  })
+
+  it('leaves digits to the browser, so its own undo still works', () => {
+    renderGrid()
+    act(() => cell(0, 0).focus())
+    expect(fireEvent.keyDown(cell(0, 0), { key: '7' })).toBe(true)
+  })
+})
+
+describe('on a touch screen', () => {
+  it('asks for no keyboard at all, so nothing slides up over the board', () => {
+    useTouchScreen()
+    renderGrid()
+    for (const input of screen.getAllByRole('textbox')) {
+      expect((input as HTMLInputElement).inputMode).toBe('none')
+    }
+  })
+
+  it('draws the number pad instead', () => {
+    useTouchScreen()
+    renderGrid()
+    expect(screen.getByRole('group', { name: 'Number pad' })).toBeDefined()
+  })
+
+  it('keeps the pad switched off until a cell is chosen', () => {
+    useTouchScreen()
+    renderGrid()
+    expect(padKey('5').getAttribute('aria-disabled')).toBe('true')
+  })
+
+  // An iPhone otherwise scrolls a focused field to mid-screen, pushing the top
+  // rows or the pad out of view.
+  it('focuses a tapped cell without scrolling the page', async () => {
+    useTouchScreen()
+    const user = userEvent.setup()
+    renderGrid()
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus')
+    // fireEvent returns false when a handler called preventDefault.
+    expect(fireEvent.mouseDown(cell(8, 8))).toBe(false)
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true })
+
+    await user.click(cell(0, 0))
+    expect(document.activeElement).toBe(cell(0, 0))
+    expect(cell(0, 0).className).toContain('cell--selected')
+  })
+
+  it('moves with the arrow keys without scrolling the page either', async () => {
+    useTouchScreen()
+    const user = userEvent.setup()
+    renderGrid()
+    act(() => cell(4, 4).focus())
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus')
+    await user.keyboard('{ArrowDown}')
+    expect(document.activeElement).toBe(cell(5, 4))
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true })
+  })
+
+  it('writes the pressed digit into the chosen cell', async () => {
+    useTouchScreen()
+    const user = userEvent.setup()
+    const { onChange } = renderGrid()
+    await user.click(cell(2, 3))
+    await user.click(padKey('7'))
+    expect(onChange).toHaveBeenCalledWith(2, 3, 7)
+  })
+
+  it('reads out what the key did, for a screen reader left on the key', async () => {
+    useTouchScreen()
+    const user = userEvent.setup()
+    renderGrid()
+    await user.click(cell(2, 3))
+    await user.click(padKey('7'))
+    expect(screen.getByText('Row 3 column 4 set to 7')).toBeDefined()
+    await user.click(padKey('Erase'))
+    expect(screen.getByText('Row 3 column 4 cleared')).toBeDefined()
+  })
+
+  it('empties the chosen cell with erase', async () => {
+    useTouchScreen()
+    const user = userEvent.setup()
+    const grid = emptyBoard()
+    grid[1][1] = 3
+    const { onChange } = renderGrid({ grid })
+    await user.click(cell(1, 1))
+    await user.click(padKey('Erase'))
+    expect(onChange).toHaveBeenCalledWith(1, 1, 0)
+  })
+
+  it('leaves the cell chosen after a key, so the shading stays put', async () => {
+    useTouchScreen()
+    const user = userEvent.setup()
+    renderGrid()
+    await user.click(cell(4, 4))
+    await user.click(padKey('2'))
+    expect(document.activeElement).toBe(cell(4, 4))
+    expect(cell(4, 4).className).toContain('cell--selected')
+    expect(document.querySelectorAll('.cell--peer')).toHaveLength(20)
+  })
+
+  // A screen reader, or a keyboard on a tablet, can land on a key.
+  it('keeps the selection while a key itself has focus', () => {
+    useTouchScreen()
+    renderGrid()
+    act(() => cell(4, 4).focus())
+    act(() => padKey('2').focus())
+    expect(document.activeElement).toBe(padKey('2'))
+    expect(cell(4, 4).className).toContain('cell--selected')
+  })
+
+  it('drops the selection once focus leaves the pad as well', () => {
+    useTouchScreen()
+    render(<button type="button">elsewhere</button>)
+    renderGrid()
+    act(() => cell(4, 4).focus())
+    act(() => padKey('2').focus())
+    act(() => screen.getByRole('button', { name: 'elsewhere' }).focus())
+    expect(document.querySelectorAll('.cell--selected')).toHaveLength(0)
+  })
+
+  it('will not write over one of the puzzle\'s clues', async () => {
+    useTouchScreen()
+    const user = userEvent.setup()
+    const grid = emptyBoard()
+    grid[0][0] = 4
+    const { onChange } = renderGrid({ grid, locked: new Set<CellKey>(['0,0']) })
+    await user.click(cell(0, 0))
+    expect(padKey('9').getAttribute('aria-disabled')).toBe('true')
+    await user.click(padKey('9'))
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('keeps a chosen clue shaded when a switched-off key is tapped', async () => {
+    useTouchScreen()
+    const user = userEvent.setup()
+    const grid = emptyBoard()
+    grid[0][0] = 4
+    renderGrid({ grid, locked: new Set<CellKey>(['0,0']) })
+    await user.click(cell(0, 0))
+    await user.click(padKey('9'))
+    expect(document.activeElement).toBe(cell(0, 0))
+    expect(cell(0, 0).className).toContain('cell--selected')
+  })
+
+  it('switches off while a solve is running', async () => {
+    useTouchScreen()
+    const user = userEvent.setup()
+    const { onChange } = renderGrid({ readOnly: true })
+    await user.click(cell(3, 3))
+    expect(padKey('1').getAttribute('aria-disabled')).toBe('true')
+    await user.click(padKey('1'))
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('does not select the digit on focus, which on iOS raises a menu over the board', () => {
+    useTouchScreen()
+    const grid = emptyBoard()
+    grid[0][0] = 5
+    renderGrid({ grid })
+    cell(0, 0).focus()
+    expect(cell(0, 0).selectionEnd! - cell(0, 0).selectionStart!).toBe(0)
+  })
+
+  it('swallows a second tap on the chosen cell, which iOS would answer with its edit menu', () => {
+    useTouchScreen()
+    renderGrid()
+    act(() => cell(4, 4).focus())
+    // fireEvent returns false when a handler called preventDefault.
+    expect(fireEvent.touchEnd(cell(4, 4))).toBe(false)
+  })
+
+  it('lets a tap on any other cell through, so it can take the selection', () => {
+    useTouchScreen()
+    renderGrid()
+    act(() => cell(4, 4).focus())
+    expect(fireEvent.touchEnd(cell(0, 0))).toBe(true)
+  })
+
+  it('still takes digits from a hardware keyboard, for a tablet with one attached', async () => {
+    useTouchScreen()
+    const user = userEvent.setup()
+    const { onChange } = renderGrid()
+    await user.type(cell(6, 6), '8')
+    expect(onChange).toHaveBeenCalledWith(6, 6, 8)
+  })
+
+  it('leaves a shortcut such as Cmd+1 to the browser', () => {
+    useTouchScreen()
+    const { onChange } = renderGrid()
+    act(() => cell(0, 0).focus())
+    // fireEvent returns true when nothing called preventDefault.
+    expect(fireEvent.keyDown(cell(0, 0), { key: '1', metaKey: true })).toBe(true)
+    expect(fireEvent.keyDown(cell(0, 0), { key: '1', ctrlKey: true })).toBe(true)
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  // Nothing is selected on focus here, so the caret can sit in front of a digit.
+  it('replaces the digit even when the caret sits in front of it', async () => {
+    useTouchScreen()
+    const user = userEvent.setup()
+    const grid = emptyBoard()
+    grid[0][0] = 5
+    const { onChange } = renderGrid({ grid })
+    act(() => cell(0, 0).focus())
+    cell(0, 0).setSelectionRange(0, 0)
+    await user.keyboard('7')
+    expect(onChange).toHaveBeenLastCalledWith(0, 0, 7)
   })
 })

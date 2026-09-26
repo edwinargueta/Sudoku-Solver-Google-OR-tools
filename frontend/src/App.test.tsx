@@ -64,6 +64,17 @@ describe('the board region', () => {
     expect(order.slice(0, 3)).toEqual(['level-picker', 'grid', 'board-actions'])
   })
 
+  it('on a touch screen, puts the number pad straight under the board', async () => {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
+    )
+    await mountApp()
+    const board = screen.getByRole('region', { name: 'Board' })
+    const order = Array.from(board.children).map((child) => child.className.split(' ')[0])
+    expect(order.slice(0, 4)).toEqual(['level-picker', 'grid', 'number-pad', 'board-actions'])
+  })
+
   it('leaves only the solver settings in the Controls region', async () => {
     await mountApp()
     const controls = screen.getByRole('region', { name: 'Controls' })
