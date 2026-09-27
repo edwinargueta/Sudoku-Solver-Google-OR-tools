@@ -212,6 +212,7 @@ body {
 
 .cell--selected {
   background-image: linear-gradient(var(--selected-tint), var(--selected-tint));
+  box-shadow: inset 0 0 0 2px var(--ok);
 }
 
 /* A clash outranks both, so it is last. */
@@ -220,10 +221,11 @@ body {
   color: var(--danger);
 }
 
-/* Keyboard focus needs a ring of its own: the selected shading is also what a
-   mouse click produces, and it is too quiet to serve as a focus indicator. */
+/* Keyboard focus gets the same green ring as .cell--selected, just drawn
+   outside the border box instead of inset, so the two reinforce each other
+   rather than clash. */
 .cell:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--ok);
   outline-offset: -2px;
 }
 
