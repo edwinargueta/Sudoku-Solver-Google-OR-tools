@@ -7,7 +7,7 @@
 #
 # Both bases are pinned by digest as well as tag, so a rebuild of the same
 # commit gets the same image. Dependabot moves the digests.
-FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS build
+FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f AS build
 
 WORKDIR /src
 COPY package.json package-lock.json .npmrc ./
@@ -29,7 +29,7 @@ RUN npm run build
 
 # A branch upstream still maintains, and so still rebuilds. The tag of one
 # that has ended, like the 1.27 this used to be, is never patched again.
-FROM nginx:1.30-alpine@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
+FROM nginx:1.31-alpine@sha256:892bb2152464f0c5d8972593a5f5afaf8054552580b699d95f8ff4af08c2d33d
 
 # Substituted into the config by the base image's entrypoint on start, so the
 # same image serves compose and every cluster. The filter keeps envsubst to

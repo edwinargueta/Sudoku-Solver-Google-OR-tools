@@ -3,7 +3,7 @@
 #
 # The base is pinned by digest as well as tag, so two builds of one commit
 # get the same OS and Python patch level. Dependabot moves the digest.
-FROM python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b AS build
+FROM python:3.13-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f AS build
 
 WORKDIR /src
 
@@ -22,14 +22,14 @@ RUN python -m venv /opt/venv \
 # pip install used to leave it. In a stage of its own, so the venv's stage,
 # and the layer the runtime takes from it, do not change with the code. A
 # plain chmod, as older BuildKit rejects a symbolic COPY --chmod.
-FROM python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b AS source
+FROM python:3.13-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f AS source
 
 WORKDIR /src
 COPY app ./app
 RUN chmod -R u=rwX,go=rX app
 
 
-FROM python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b
+FROM python:3.13-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f
 
 # FORWARDED_ALLOW_IPS is read by uvicorn itself: the proxies whose
 # X-Forwarded-For and -Proto it believes. Loopback by default, which inside a
