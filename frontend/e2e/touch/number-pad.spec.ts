@@ -53,6 +53,22 @@ test('a key writes into the chosen cell and leaves it chosen', { tag: '@smoke' }
   await expect(board.announcer).toHaveText('Row 1 column 3 cleared')
 })
 
+test('erase says what it did', async ({ board }) => {
+  await board.deal('easy')
+  await board.choose(1, 3)
+  await board.erase.tap()
+  await expect(board.announcer).toHaveText('Row 1 column 3 already empty')
+
+  // A digit the solver put there is on the board, so erasing it clears it.
+  await board.press('Solve')
+  await expect(board.status).toHaveText(/^Solved in /)
+  await board.choose(1, 3)
+  await expect(board.cell(1, 3)).toHaveValue('4')
+  await board.erase.tap()
+  await expect(board.cell(1, 3)).toHaveValue('')
+  await expect(board.announcer).toHaveText('Row 1 column 3 cleared')
+})
+
 test('the keys only wake for a cell that can be written', async ({ board }) => {
   await board.deal('easy')
   await expect(board.key(5)).toHaveAttribute('aria-disabled', 'true')

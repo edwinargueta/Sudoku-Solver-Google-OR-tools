@@ -1,13 +1,19 @@
 # Applied once per cluster, after cert-manager itself:
 #
 #   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/<VERSION>/cert-manager.yaml
+#   kubectl -n cert-manager wait --for=condition=Available deployment --all --timeout=180s
 #   kubectl apply -f deploy/k8s/bootstrap/clusterissuer.yaml
+#
+# The wait is for cert-manager's webhook, which rejects the issuer until it
+# is up. Should the apply still fail with "failed calling webhook", the CA
+# bundle is not injected yet: give it a few seconds and apply again.
 #
 # It lives outside the overlays on purpose: it is cluster-scoped, and its
 # kind does not exist until cert-manager's CRDs are installed.
 #
-# Swap the server for the staging URL while testing — Let's Encrypt rate
-# limits are per-domain and unforgiving:
+# Swap the server for the staging URL while testing. Production allows five
+# failed validations per hostname an hour, and five copies of the same
+# certificate a week:
 #   https://acme-staging-v02.api.letsencrypt.org/directory
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -16,10 +22,14 @@ metadata:
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
+    # The ACME account's contact. Let's Encrypt no longer sends expiry
+    # mail; `kubectl get certificate` is where renewal shows.
     email: edwin.argueta.a93@gmail.com
     privateKeySecretRef:
       name: letsencrypt-prod-account-key
     solvers:
       - http01:
           ingress:
-            class: traefik
+            # The field, not the old `class`, which puts the deprecated
+            # kubernetes.io/ingress.class annotation on the solver's Ingress.
+            ingressClassName: traefik

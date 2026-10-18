@@ -1,17 +1,22 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { Grid } from '../api/types'
 import type { CellKey } from '../lib/grid'
+import { setCell } from '../lib/grid'
 import SudokuGrid from './SudokuGrid'
+
+type Props = Parameters<typeof SudokuGrid>[0]
 
 function emptyBoard(): Grid {
   return Array.from({ length: 9 }, () => Array<number>(9).fill(0))
 }
 
-function renderGrid(overrides: Partial<Parameters<typeof SudokuGrid>[0]> = {}) {
+function renderGrid(overrides: Partial<Props> = {}) {
   const onChange = vi.fn()
+  const onUndo = vi.fn()
   const props = {
     grid: emptyBoard(),
     givens: new Set<CellKey>(),
@@ -19,10 +24,35 @@ function renderGrid(overrides: Partial<Parameters<typeof SudokuGrid>[0]> = {}) {
     conflictedCells: new Set<CellKey>(),
     readOnly: false,
     onChange,
+    onUndo,
     ...overrides,
   }
   render(<SudokuGrid {...props} />)
-  return { onChange }
+  return { onChange, onUndo }
+}
+
+/**
+ * A board that keeps what is typed into it, as the app's does. With a bare
+ * mock the input snaps back after every key, so a second digit never meets
+ * the first.
+ */
+function Playable({ start }: { start: Grid }) {
+  const [grid, setGrid] = useState(start)
+  return (
+    <SudokuGrid
+      grid={grid}
+      givens={new Set<CellKey>()}
+      locked={new Set<CellKey>()}
+      conflictedCells={new Set<CellKey>()}
+      readOnly={false}
+      onChange={(row, col, value) => setGrid((current) => setCell(current, row, col, value))}
+      onUndo={() => {}}
+    />
+  )
+}
+
+function renderPlayable(start = emptyBoard()): void {
+  render(<Playable start={start} />)
 }
 
 /** The input for one cell, found the way the component labels it. */
@@ -71,6 +101,17 @@ describe('rendering', () => {
     expect(cell(0, 1).className).toContain('cell--conflict')
   })
 
+  // Colour alone says nothing to a screen reader, or in forced colours.
+  it('tells assistive tech which cells are in conflict', () => {
+    const grid = emptyBoard()
+    grid[0][0] = 4
+    grid[0][1] = 4
+    renderGrid({ grid, conflictedCells: new Set<CellKey>(['0,0', '0,1']) })
+    expect(cell(0, 0).getAttribute('aria-invalid')).toBe('true')
+    expect(cell(0, 1).getAttribute('aria-invalid')).toBe('true')
+    expect(cell(0, 2).hasAttribute('aria-invalid')).toBe(false)
+  })
+
   it('draws the box borders on the third and sixth columns', () => {
     renderGrid()
     expect(cell(0, 2).className).toContain('cell--box-right')
@@ -78,9 +119,62 @@ describe('rendering', () => {
     expect(cell(2, 0).className).toContain('cell--box-bottom')
   })
 
+  it('marks the last column and row, which stop at the frame', () => {
+    renderGrid()
+    expect(cell(3, 8).className).toContain('cell--last-col')
+    expect(cell(3, 7).className).not.toContain('cell--last-col')
+    expect(cell(8, 3).className).toContain('cell--last-row')
+    expect(cell(7, 3).className).not.toContain('cell--last-row')
+  })
+
   it('is read-only while a solve is running', () => {
     renderGrid({ readOnly: true })
     expect(cell(3, 3).readOnly).toBe(true)
+  })
+})
+
+describe('as an ARIA grid', () => {
+  it('is nine rows of nine cells, each holding its input', () => {
+    renderGrid()
+    const board = screen.getByRole('grid', { name: 'Sudoku board' })
+    const rows = within(board).getAllByRole('row')
+    expect(rows).toHaveLength(9)
+    rows.forEach((row, r) => {
+      const cells = within(row).getAllByRole('gridcell')
+      expect(cells).toHaveLength(9)
+      cells.forEach((gridcell, c) => {
+        // The input keeps its own textbox role, so it is still announced as editable.
+        expect(within(gridcell).getByRole('textbox')).toBe(cell(r, c))
+      })
+    })
+  })
+
+  it('is one stop in the Tab order, at the first cell to begin with', () => {
+    renderGrid()
+    const stops = screen.getAllByRole('textbox').filter((input) => input.tabIndex === 0)
+    expect(stops).toEqual([cell(0, 0)])
+  })
+
+  it('moves that stop to the cell last chosen, and keeps it there once focus leaves', async () => {
+    const user = userEvent.setup()
+    render(<button type="button">elsewhere</button>)
+    renderGrid()
+    await user.click(cell(4, 4))
+    await user.keyboard('{ArrowRight}')
+    await user.click(screen.getByRole('button', { name: 'elsewhere' }))
+    const stops = screen.getAllByRole('textbox').filter((input) => input.tabIndex === 0)
+    expect(stops).toEqual([cell(4, 5)])
+  })
+
+  it('is left by a single Tab, and returned to by a single Shift+Tab', async () => {
+    const user = userEvent.setup()
+    renderGrid()
+    render(<button type="button">after</button>)
+    await user.click(cell(2, 2))
+    await user.tab()
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'after' }))
+    await user.tab({ shift: true })
+    expect(document.activeElement).toBe(cell(2, 2))
   })
 })
 
@@ -125,11 +219,43 @@ describe('typing', () => {
 
   it('keeps the last digit rather than appending', async () => {
     const user = userEvent.setup()
+    renderPlayable()
+    await user.click(cell(0, 0))
+    await user.keyboard('4')
+    expect(cell(0, 0).value).toBe('4')
+    await user.keyboard('7')
+    expect(cell(0, 0).value).toBe('7')
+  })
+
+  // What a click that leaves the caret after the digit, rather than selecting
+  // it, hands the input: the old digit with the new one appended.
+  it('replaces the digit when the caret sits after it', async () => {
+    const user = userEvent.setup()
     const grid = emptyBoard()
     grid[0][0] = 5
+    renderPlayable(grid)
+    act(() => cell(0, 0).focus())
+    cell(0, 0).setSelectionRange(1, 1)
+    await user.keyboard('7')
+    expect(cell(0, 0).value).toBe('7')
+  })
+
+  // With the caret beside the digit rather than over it, retyping the digit
+  // arrives as a second copy of it. The cell shows it already, so there is
+  // nothing to report, as from the pad: reporting it would take down a
+  // solution shown there.
+  it('ignores the digit the cell already shows, on either side of the caret', async () => {
+    const user = userEvent.setup()
+    const grid = emptyBoard()
+    grid[0][2] = 4
     const { onChange } = renderGrid({ grid })
-    await user.type(cell(0, 0), '7')
-    expect(onChange).toHaveBeenLastCalledWith(0, 0, 7)
+    act(() => cell(0, 2).focus())
+    for (const caret of [0, 1]) {
+      cell(0, 2).setSelectionRange(caret, caret)
+      await user.keyboard('4')
+    }
+    expect(onChange).not.toHaveBeenCalled()
+    expect(cell(0, 2).value).toBe('4')
   })
 
   it('clears the cell on Backspace', async () => {
@@ -140,6 +266,54 @@ describe('typing', () => {
     cell(1, 1).focus()
     await user.keyboard('{Backspace}')
     expect(onChange).toHaveBeenCalledWith(1, 1, 0)
+  })
+
+  // A cell emptied mid-solve would have the answer land over it.
+  it('leaves the cell alone on Backspace or Delete while a solve is running', async () => {
+    const user = userEvent.setup()
+    const grid = emptyBoard()
+    grid[1][1] = 3
+    const { onChange } = renderGrid({ grid, readOnly: true })
+    cell(1, 1).focus()
+    await user.keyboard('{Backspace}{Delete}')
+    expect(onChange).not.toHaveBeenCalled()
+  })
+})
+
+describe('undo', () => {
+  it('is the game\'s Undo on Ctrl+Z or Cmd+Z, not the browser\'s', () => {
+    const { onUndo, onChange } = renderGrid()
+    act(() => cell(0, 0).focus())
+    // fireEvent returns false when a handler called preventDefault.
+    expect(fireEvent.keyDown(cell(0, 0), { key: 'z', ctrlKey: true })).toBe(false)
+    expect(fireEvent.keyDown(cell(0, 0), { key: 'z', metaKey: true })).toBe(false)
+    expect(onUndo).toHaveBeenCalledTimes(2)
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('swallows redo, which the game does not have', () => {
+    const { onUndo } = renderGrid()
+    act(() => cell(0, 0).focus())
+    expect(fireEvent.keyDown(cell(0, 0), { key: 'Z', metaKey: true, shiftKey: true })).toBe(false)
+    expect(fireEvent.keyDown(cell(0, 0), { key: 'y', ctrlKey: true })).toBe(false)
+    expect(onUndo).not.toHaveBeenCalled()
+  })
+
+  it('does nothing while a solve is running', () => {
+    const { onUndo } = renderGrid({ readOnly: true })
+    act(() => cell(0, 0).focus())
+    fireEvent.keyDown(cell(0, 0), { key: 'z', ctrlKey: true })
+    expect(onUndo).not.toHaveBeenCalled()
+  })
+
+  // Undo from the Edit menu arrives as an input event, with no key to catch.
+  it('ignores the browser\'s own undo when it arrives some other way', () => {
+    const grid = emptyBoard()
+    grid[0][0] = 4
+    const { onChange } = renderGrid({ grid })
+    fireEvent.input(cell(0, 0), { target: { value: '' }, inputType: 'historyUndo' })
+    expect(onChange).not.toHaveBeenCalled()
+    expect(cell(0, 0).value).toBe('4')
   })
 })
 
@@ -341,7 +515,7 @@ describe('with a mouse and keyboard', () => {
     expect(fireEvent.mouseDown(cell(4, 4))).toBe(true)
   })
 
-  it('leaves digits to the browser, so its own undo still works', () => {
+  it('leaves digits to the browser, whose input event carries them', () => {
     renderGrid()
     act(() => cell(0, 0).focus())
     expect(fireEvent.keyDown(cell(0, 0), { key: '7' })).toBe(true)
@@ -408,12 +582,38 @@ describe('on a touch screen', () => {
   it('reads out what the key did, for a screen reader left on the key', async () => {
     useTouchScreen()
     const user = userEvent.setup()
-    renderGrid()
+    renderPlayable()
     await user.click(cell(2, 3))
     await user.click(padKey('7'))
     expect(screen.getByText('Row 3 column 4 set to 7')).toBeDefined()
     await user.click(padKey('Erase'))
     expect(screen.getByText('Row 3 column 4 cleared')).toBeDefined()
+  })
+
+  it('does not claim to have cleared a cell that was empty already', async () => {
+    useTouchScreen()
+    const user = userEvent.setup()
+    const { onChange } = renderGrid()
+    await user.click(cell(2, 3))
+    await user.click(padKey('Erase'))
+    expect(screen.getByText('Row 3 column 4 already empty')).toBeDefined()
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  // As retyping it from a keyboard does nothing. Reporting it would take
+  // down a solution shown there, over a digit the board already had.
+  it('leaves a cell alone when the key is the digit it already shows', async () => {
+    useTouchScreen()
+    const user = userEvent.setup()
+    const grid = emptyBoard()
+    grid[0][2] = 4
+    const { onChange } = renderGrid({ grid })
+    await user.click(cell(0, 2))
+    await user.click(padKey('4'))
+    expect(onChange).not.toHaveBeenCalled()
+    expect(screen.getByText('Row 1 column 3 already 4')).toBeDefined()
+    await user.click(padKey('5'))
+    expect(onChange).toHaveBeenCalledWith(0, 2, 5)
   })
 
   it('empties the chosen cell with erase', async () => {
@@ -522,6 +722,19 @@ describe('on a touch screen', () => {
     const { onChange } = renderGrid()
     await user.type(cell(6, 6), '8')
     expect(onChange).toHaveBeenCalledWith(6, 6, 8)
+  })
+
+  // Nothing is selected on focus here, so the caret is wherever the tap left it.
+  it('replaces the digit from a hardware keyboard with the caret after it', async () => {
+    useTouchScreen()
+    const user = userEvent.setup()
+    const grid = emptyBoard()
+    grid[0][0] = 5
+    renderPlayable(grid)
+    await user.click(cell(0, 0))
+    cell(0, 0).setSelectionRange(1, 1)
+    await user.keyboard('7')
+    expect(cell(0, 0).value).toBe('7')
   })
 
   // Nothing is selected on focus here, so the caret can sit in front of a digit.

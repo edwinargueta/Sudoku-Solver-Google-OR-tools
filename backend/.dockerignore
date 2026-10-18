@@ -1,8 +1,12 @@
+# Patterns match from the context's root; the ones that can turn up inside
+# app/, which the image copies as it is, need **/ to match there too.
 .venv/
-__pycache__/
-*.py[cod]
+**/__pycache__/
+**/*.py[cod]
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
 .env
+.env.*
+**/.DS_Store
 tests/

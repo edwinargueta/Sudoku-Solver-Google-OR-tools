@@ -59,11 +59,46 @@ for (const [side, fraction] of [['left edge', 0.1], ['centre', 0.5], ['right edg
   })
 }
 
-test('the browser\'s own undo takes back a typed digit', async ({ board }) => {
+// The browser's own undo knows only the one input, and used to be recorded as
+// a new move, which the Undo button then put back. The shortcut is Undo now.
+test('Ctrl+Z or Cmd+Z is the game\'s Undo', async ({ board }) => {
   await board.deal('easy')
   await board.enter(1, 3, 4)
+  await board.enter(1, 4, 6)
+
   await board.page.keyboard.press('ControlOrMeta+z')
+  await expect(board.cell(1, 4)).toHaveValue('')
+  await expect(board.cell(1, 3), 'one move at a time').toHaveValue('4')
+
+  // The button carries on from there, rather than putting the 6 back.
+  await board.press('Undo')
   await expect(board.cell(1, 3)).toHaveValue('')
+  await expect(board.cell(1, 4)).toHaveValue('')
+  await expect(board.action('Undo')).toBeDisabled()
+})
+
+test('the board is one stop in the Tab order', async ({ board }) => {
+  const { page } = board
+  await board.deal('easy')
+  await board.choose(5, 5)
+  await page.keyboard.press('ArrowRight')
+  await expect(board.cell(5, 6)).toBeFocused()
+
+  // One Tab leaves the board, wherever on it the player was.
+  await page.keyboard.press('Tab')
+  await expect(board.grid.locator(':focus')).toHaveCount(0)
+  // And one back returns to the cell they left.
+  await page.keyboard.press('Shift+Tab')
+  await expect(board.cell(5, 6)).toBeFocused()
+})
+
+test('the board reads as nine rows of nine cells', async ({ board }) => {
+  const rows = board.grid.getByRole('row')
+  await expect(rows).toHaveCount(9)
+  await expect(rows.nth(4).getByRole('gridcell')).toHaveCount(9)
+  await expect(rows.nth(4).getByRole('gridcell').nth(2).getByRole('textbox')).toHaveAccessibleName(
+    'row 5 column 3',
+  )
 })
 
 test('there is no number pad, and the cells ask for the numeric keyboard', async ({ board }) => {

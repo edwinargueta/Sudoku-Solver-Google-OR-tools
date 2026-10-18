@@ -10,6 +10,7 @@ const STATS: SolveResponse = {
   solutions: [],
   solution_count: 1,
   unique: true,
+  exhaustive: true,
   truncated: false,
   wall_time_ms: 12.345,
   branches: 1234,

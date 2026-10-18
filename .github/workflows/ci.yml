@@ -1,39 +1,59 @@
 name: ci
 
-# Tests run on every push to main and on every pull request. Images are only
-# built once every suite has passed — a red test never reaches the registry.
+# Tests run on every push to main and on every pull request, and so do the
+# checks on the images and manifests. Images are only pushed from main, once
+# all of it has passed — a red test never reaches the registry.
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
 
+# Read-only everywhere; the one job that pushes asks for more itself.
+permissions:
+  contents: read
+
+# One run per branch at a time. A pull request's new push cancels the run
+# it replaces; on main runs queue instead, so builds land in commit order.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   REGISTRY: ghcr.io
 
+# Every action is pinned to a commit, with its release in the comment, so a
+# moved tag cannot change what runs here. Dependabot proposes the updates.
 jobs:
   backend:
     name: backend tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.13'
           cache: pip
-          cache-dependency-path: backend/pyproject.toml
+          cache-dependency-path: backend/requirements-dev.lock
 
+      # The locked versions, hashes checked, which are the ones the image
+      # ships. The app itself is not installed, here or in the image: pytest
+      # imports it from this folder, so nothing has to build it, and nothing
+      # unpinned is fetched to do so.
       - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+        run: python -m pip install -r requirements-dev.lock
 
       - name: Lint
-        run: python -m ruff check app tests
+        run: |
+          python -m ruff check app tests
+          python -m ruff format --check app tests
 
       - name: Test
         run: python -m pytest
@@ -41,14 +61,17 @@ jobs:
   frontend:
     name: frontend tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # The same version `nvm use` picks locally, so CI and laptops agree.
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: frontend/.nvmrc
           cache: npm
@@ -77,24 +100,28 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.13'
           cache: pip
-          cache-dependency-path: backend/pyproject.toml
+          cache-dependency-path: backend/requirements.lock
 
-      # Runtime dependencies only, as the image installs them, into the .venv
-      # that playwright.config.ts starts uvicorn from. A module that only the
-      # dev extras provide fails here rather than in the pod.
+      # Runtime dependencies only, from the lock the image installs, into the
+      # .venv that playwright.config.ts starts uvicorn from; uvicorn imports
+      # the app from backend/, as it does from the image's working directory.
+      # A module that only the dev extras provide fails here rather than in
+      # the pod.
       - name: Install the API
         working-directory: backend
         run: |
           python -m venv .venv
-          .venv/bin/python -m pip install .
+          .venv/bin/python -m pip install -r requirements.lock
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: frontend/.nvmrc
           cache: npm
@@ -117,7 +144,7 @@ jobs:
       # Overwritten, so re-running a failed job keeps the latest attempt's.
       - name: Upload report
         if: failure() || cancelled()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-report
           path: frontend/playwright-report/
@@ -128,25 +155,94 @@ jobs:
       # of the tests that did finish are already on disk.
       - name: Upload traces
         if: cancelled()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-results
           path: frontend/test-results/
           retention-days: 14
           overwrite: true
 
+  # The e2e suite runs against `vite preview`, and `docker build` succeeds
+  # whatever the nginx template says, since the entrypoint only renders it
+  # when a container starts. So both images are built natively here and run
+  # the way the cluster runs them, on every pull request too.
+  images:
+    name: image checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # A checkout is 644 here, but made under umask 077 it is 600, and COPY
+      # keeps that. Built from the worst case, an image whose user cannot
+      # read its own files fails the smoke test instead of a rollout.
+      - name: Take group and other access off the sources
+        run: chmod -R go-rwx backend frontend
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Loaded into the runner's Docker rather than pushed. Each image has a
+      # cache scope of its own, apart from the arm64 builds below.
+      - name: Build the API image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ./backend
+          load: true
+          tags: sudoku-api:ci
+          provenance: false
+          cache-from: type=gha,scope=check-backend
+          cache-to: type=gha,scope=check-backend,mode=max
+
+      - name: Build the web image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ./frontend
+          load: true
+          tags: sudoku-web:ci
+          provenance: false
+          cache-from: type=gha,scope=check-frontend
+          cache-to: type=gha,scope=check-frontend,mode=max
+
+      # `make smoke` runs the same script against locally built images.
+      - name: Smoke test
+        run: .github/scripts/smoke.sh sudoku-api:ci sudoku-web:ci
+
+  manifests:
+    name: manifests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Both overlays have to render, prod the way `make deploy` renders it:
+      # pinned to a commit, this one, with no image left on anything else.
+      - name: Render
+        run: |
+          make --no-print-directory manifests ENV=dev > /dev/null
+          make --no-print-directory manifests ENV=prod TAG=${{ github.sha }} > /dev/null
+
   build:
     name: build and push
     runs-on: ubuntu-latest
-    # The gate: nothing is built or pushed unless every suite is green.
-    needs: [backend, frontend, e2e]
-    # Pull requests are tested, not published.
-    if: github.event_name != 'pull_request'
+    timeout-minutes: 30
+    # The gate: nothing is built or pushed unless every check is green.
+    needs: [backend, frontend, e2e, images, manifests]
+    # Only main publishes. A pull request, or a manual run from any other
+    # branch, stops at the checks above.
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     permissions:
       contents: read
       packages: write            # required to push to GHCR
 
     strategy:
+      # One image failing does not stop the other mid-push, so a re-run of
+      # the failed job is all that is left to do.
+      fail-fast: false
       matrix:
         # One entry per image. Each `name` becomes
         # ghcr.io/<owner>/<name>, which must match the image: line in
@@ -160,18 +256,20 @@ jobs:
             dockerfile: ./frontend/Dockerfile
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # The runner is x86; the Ampere VM is not. QEMU covers the difference.
       # The frontend's Node stage is pinned to $BUILDPLATFORM in its
       # Dockerfile, so only the small nginx stage is actually emulated.
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -183,19 +281,22 @@ jobs:
         run: echo "lc=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push (arm64)
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           platforms: linux/arm64
           push: true
-          # :latest is what the cluster pulls; the commit tag is there so a
-          # bad deploy can be pinned back to a known-good image.
+          # The commit tag is what prod runs: `make deploy ENV=prod
+          # TAG=<sha>` pins both images to it. :latest only says which build
+          # of main is newest; nothing deploys it.
           tags: |
             ${{ env.REGISTRY }}/${{ steps.owner.outputs.lc }}/${{ matrix.name }}:latest
             ${{ env.REGISTRY }}/${{ steps.owner.outputs.lc }}/${{ matrix.name }}:${{ github.sha }}
           # A single-platform image needs no attestation manifest; without
           # this the package page grows an "unknown/unknown" entry.
           provenance: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # A scope per image. Unscoped, the two legs share one cache and
+          # each run keeps only whichever finished last.
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }},mode=max

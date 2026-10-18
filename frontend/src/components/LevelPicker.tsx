@@ -13,19 +13,37 @@ import type { Level } from '../api/types'
 interface LevelPickerProps {
   levels: Level[]
   level: string
+  /** A request is out; a pick now would race it, so it is ignored. */
   busy: boolean
+  /** The list of levels could not be fetched, and has not been since. */
+  failed: boolean
+  /** The list of levels is on its way, first time or on a retry. */
+  loading: boolean
   onPickLevel: (level: string) => void
   onShuffle: () => void
+  onRetry: () => void
 }
+
+// While busy, the select and the button are marked with aria-disabled and
+// ignore input, rather than being disabled: they are what the player just
+// used, and disabling the focused control drops focus to the page.
 
 export default function LevelPicker({
   levels,
   level,
   busy,
+  failed,
+  loading,
   onPickLevel,
   onShuffle,
+  onRetry,
 }: LevelPickerProps) {
   const chosen = levels.find((entry) => entry.key === level)
+  const placeholder = levels.length
+    ? 'Choose a difficulty…'
+    : failed && !loading
+      ? 'Could not load the levels'
+      : 'Loading…'
 
   return (
     <div className="level-picker">
@@ -34,11 +52,14 @@ export default function LevelPicker({
           className="select"
           aria-label="Difficulty"
           value={level}
-          disabled={busy || levels.length === 0}
-          onChange={(event) => onPickLevel(event.target.value)}
+          disabled={levels.length === 0}
+          aria-disabled={busy}
+          onChange={(event) => {
+            if (!busy) onPickLevel(event.target.value)
+          }}
         >
           <option value="" disabled>
-            {levels.length ? 'Choose a difficulty…' : 'Loading…'}
+            {placeholder}
           </option>
           {levels.map((entry) => (
             <option key={entry.key} value={entry.key}>
@@ -47,10 +68,30 @@ export default function LevelPicker({
             </option>
           ))}
         </select>
-        {/* Re-picking the same option fires no change event, so rerolling needs a button. */}
-        <button className="button button--ghost" onClick={onShuffle} disabled={busy || !level}>
-          New puzzle
-        </button>
+        {/* One button, relabelled rather than swapped for another, so a
+            successful Retry leaves focus where it was. Re-picking the same
+            option fires no change event, so rerolling needs a button. */}
+        {failed ? (
+          <button
+            className="button button--ghost"
+            aria-disabled={loading}
+            onClick={() => {
+              if (!loading) onRetry()
+            }}
+          >
+            Retry
+          </button>
+        ) : (
+          <button
+            className="button button--ghost"
+            aria-disabled={busy || !level}
+            onClick={() => {
+              if (!busy && level) onShuffle()
+            }}
+          >
+            New puzzle
+          </button>
+        )}
       </div>
       {chosen ? <small className="field__hint">{chosen.description}</small> : null}
     </div>

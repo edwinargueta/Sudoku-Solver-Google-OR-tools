@@ -1,0 +1,30 @@
+# The Actions in ci.yml are pinned to commits and the Dockerfiles' base images
+# to digests, and neither moves on its own. This proposes the updates, once a
+# month, one pull request per ecosystem, and CI tests each like any other.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directories:
+      - /backend
+      - /frontend
+    schedule:
+      interval: monthly
+    groups:
+      base-images:
+        patterns: ["*"]
+    ignore:
+      # Each moves with something outside its Dockerfile, so by hand: Node
+      # with frontend/.nvmrc, Python with the python-version in ci.yml. New
+      # digests for the same tags still come through.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+      - dependency-name: python
+        update-types: ["version-update:semver-minor"]

@@ -1,11 +1,48 @@
-# Serves the built SPA and puts the API on the same origin, which is the
-# production counterpart of the proxy in vite.config.ts. CORS never applies.
+# Serves the built SPA and proxies the API's paths to uvicorn, so the browser
+# sees one origin and CORS never applies.
+#
+# Which of those paths reach this server depends on where it runs. Under
+# compose, all of them: /api/ below is the counterpart of the proxy in
+# vite.config.ts. In the cluster the ingress sends /api straight to the api
+# Service, and only the docs paths come through here. A limit that has to
+# hold in production, such as on request size, belongs in the app.
+
+# The scheme the API is told about. Behind Traefik the request came in over
+# HTTPS and arrives here as plain HTTP, so Traefik's header is passed on.
+# With nothing in front (compose), it is the scheme nginx saw itself, unless
+# the client sent one; X-Forwarded-For below likewise adds to the client's
+# own. Neither is checked here: what the API believes is decided by
+# FORWARDED_ALLOW_IPS, and in the cluster Traefik has already replaced both.
+map $http_x_forwarded_proto $forwarded_proto {
+    default $http_x_forwarded_proto;
+    ""      $scheme;
+}
+
 server {
     listen 8080;
     server_name _;
 
     root /usr/share/nginx/html;
     index index.html;
+
+    # No version number in the Server header or on error pages.
+    server_tokens off;
+
+    # The bundle is about a third of its size gzipped.
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/css application/javascript application/json image/svg+xml;
+
+    # On every response, error pages included. `merge` (nginx 1.29.3 and
+    # later) makes a location's own add_header add to these; by default it
+    # would replace them all.
+    add_header_inherit merge;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    # Browsers ignore it over plain HTTP, so compose is unaffected. Behind
+    # Traefik it keeps a returning visitor on HTTPS.
+    add_header Strict-Transport-Security "max-age=31536000" always;
 
     # Vite fingerprints these, so they can be cached hard. One header, not
     # the two that `expires` plus `add_header` would emit.
@@ -14,22 +51,44 @@ server {
         try_files $uri =404;
     }
 
+    # index.html, which the fallback also serves for every client-side route.
+    # Revalidated on each load, so a browser picks up a deploy straight away
+    # instead of asking for assets the new pods no longer have.
     location / {
+        add_header Cache-Control "no-cache";
+        # The SPA loads nothing from anywhere else; its favicon is a data:
+        # URI in index.html, and it calls the API on this origin. An image
+        # built with a VITE_API_BASE_URL on another origin needs that origin
+        # in a connect-src here, or the browser blocks every call. The docs
+        # below are left out of it: Swagger UI comes from a CDN.
+        add_header Content-Security-Policy "default-src 'self'; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'";
         try_files $uri $uri/ /index.html;
+    }
+
+    # The icon is inlined in index.html, so a request here is a browser
+    # guessing at the default path; the fallback would answer with index.html.
+    location = /favicon.ico {
+        access_log off;
+        log_not_found off;
+        try_files $uri =404;
     }
 
     location /api/ {
         proxy_pass ${BACKEND_ORIGIN};
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        # $http_host keeps the port, so a redirect from the API comes back here.
+        proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Proto $forwarded_proto;
     }
 
-    # FastAPI hangs its docs off the root, outside the /api prefix.
-    location ~ ^/(docs|redoc|openapi\.json) {
+    # FastAPI hangs its docs off the root, outside the /api prefix. Anchored,
+    # so /docsfoo stays with the SPA; /docs/... is for oauth2-redirect.
+    location ~ ^/(docs(/.*)?|redoc|openapi\.json)$ {
         proxy_pass ${BACKEND_ORIGIN};
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $forwarded_proto;
     }
 }

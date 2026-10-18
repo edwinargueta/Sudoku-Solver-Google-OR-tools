@@ -10,12 +10,17 @@
   --accent: #1f6feb;
   --accent-contrast: #ffffff;
   --given: #16191f;
-  --solved: #1f6feb;
-  --danger: #c0353a;
+  /* Digits are darker than the accent: they sit on the selected cell's tint,
+     and the accent there is only 3.5:1, short of the 4.5:1 text needs. */
+  --solved: #1558c4;
+  --danger: #a4262b;
   --danger-bg: #fdeaea;
   --given-bg: #eceff4;
   --peer-tint: rgb(31 111 235 / 9%);
   --selected-tint: rgb(31 111 235 / 20%);
+  /* Its own token rather than --ok: a selected cell is neither right nor
+     wrong, and one in conflict should not be ringed in the success colour. */
+  --selection-ring: var(--accent);
   --grid-line: #d8dce3;
   --grid-line-strong: #8b94a3;
   --ok: #1a7f4b;
@@ -37,8 +42,8 @@
     --accent: #4d9bff;
     --accent-contrast: #08111f;
     --given: #e7eaf0;
-    --solved: #4d9bff;
-    --danger: #ff6b6b;
+    --solved: #6aacff;
+    --danger: #ff8a8a;
     --danger-bg: #3a1d1f;
     --given-bg: #1e242f;
     --peer-tint: rgb(77 155 255 / 12%);
@@ -141,15 +146,26 @@ body {
    mechanism rather than three: 1px between cells, 2px where the boxes meet,
    and the frame matching the box lines. The grid itself draws nothing. */
 
+/* Rows as well as columns: left to size themselves, rows follow the digits'
+   height, which tracks the viewport rather than the board, and on a phone on
+   its side WebKit overflows the square and clips the bottom row. */
 .grid {
   display: grid;
   grid-template-columns: repeat(9, minmax(0, 1fr));
+  grid-template-rows: repeat(9, minmax(0, 1fr));
   width: min(100%, 432px);
   aspect-ratio: 1;
   border: 2px solid var(--grid-line-strong);
   border-radius: 6px;
   overflow: hidden;
   background: var(--surface);
+}
+
+/* The row and gridcell wrappers exist for assistive tech; laid out, the
+   inputs are the board's own grid items. */
+.grid__row,
+.grid__cell {
+  display: contents;
 }
 
 .cell {
@@ -169,11 +185,11 @@ body {
 }
 
 /* The last column and row stop at the frame instead of doubling it. */
-.cell:nth-child(9n) {
+.cell--last-col {
   border-right: 0;
 }
 
-.cell:nth-child(n + 73) {
+.cell--last-row {
   border-bottom: 0;
 }
 
@@ -210,23 +226,53 @@ body {
   background-image: linear-gradient(var(--peer-tint), var(--peer-tint));
 }
 
+/* The ring is the focus indicator as well: a cell is selected exactly while
+   it has focus, or while the number pad it types for does. It is an outline
+   pulled inside the border box by the negative offset, over the cell's own
+   right and bottom lines, because the grid's overflow: hidden would clip one
+   drawn outside at the board's edges. An outline rather than an inset
+   box-shadow, which forced-colors mode throws away. */
 .cell--selected {
   background-image: linear-gradient(var(--selected-tint), var(--selected-tint));
-  box-shadow: inset 0 0 0 2px var(--ok);
+  outline: 2px solid var(--selection-ring);
+  outline-offset: -2px;
 }
 
-/* A clash outranks both, so it is last. */
+/* A clash swaps the cell's own background. The peer and selected tints are
+   background images, so they still paint over it; the colours are chosen to
+   keep 4.5:1 with the tint on top. The wavy underline is a second sign that
+   does not depend on seeing red, and it survives forced colors, which drop
+   every fill. An input clips its text to the line box, which at the normal
+   line height cuts the wave in half; the digit stays centred either way. The
+   taller box still has to fit the cell, which is why the digits shrink with
+   the board on a touch screen (see pointer: coarse below). */
 .cell--conflict {
   background-color: var(--danger-bg);
   color: var(--danger);
+  line-height: 1.6;
+  text-decoration: underline wavy;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.15em;
 }
 
-/* Keyboard focus gets the same green ring as .cell--selected, just drawn
-   outside the border box instead of inset, so the two reinforce each other
-   rather than clash. */
-.cell:focus-visible {
-  outline: 2px solid var(--ok);
-  outline-offset: -2px;
+/* Forced colors (Windows High Contrast) paints every cell the same Canvas and
+   drops the tints, so selection and conflicts need lines of their own. Clues
+   keep their bold weight from .cell--given. */
+@media (forced-colors: active) {
+  .cell--selected {
+    outline: 3px solid Highlight;
+    outline-offset: -3px;
+  }
+
+  .cell--conflict {
+    outline: 2px dashed CanvasText;
+    outline-offset: -4px;
+  }
+
+  .cell--conflict.cell--selected {
+    outline: 3px dashed Highlight;
+    outline-offset: -3px;
+  }
 }
 
 .level-picker {
@@ -235,9 +281,12 @@ body {
   width: min(100%, 432px);
 }
 
-/* Matches the board's own width expression so the two line up exactly. An
-   explicit grid rather than flex-wrap: wrapping would strand Clear alone on a
-   full-width row, making the irreversible action the largest target here.
+/* Matches the board's own width expression, so the two line up exactly
+   everywhere but a touch screen on its side: the height cap below narrows the
+   board there, and this row keeps its width so the targets stay big enough
+   to hit. An explicit grid rather than flex-wrap: wrapping would strand Clear
+   alone on a full-width row, making the irreversible action the largest
+   target here.
    Check Moves is the one long label: four equal columns squeeze it onto two
    lines, so it gets the width it needs and the short three share the rest.
    max-width as well: Chrome sizes the board's column from this row's content,
@@ -325,9 +374,14 @@ body {
    pad. Kept after the rules it overrides so that source order cannot undo it. */
 @media (pointer: coarse) {
   /* Digits come from the pad, so a blinking caret only suggests a keyboard is
-     on its way. The selected shading already says which cell is chosen. */
+     on its way. The selected shading already says which cell is chosen.
+     The digits shrink with the board under the height cap below: sized from
+     the width alone, they stay full size in the small board of a phone on its
+     side, and a clash's taller line box no longer fits its cell. 5.25% of the
+     cap is full size at the full 432px board. */
   .cell {
     caret-color: transparent;
+    font-size: min(clamp(1rem, 4vw, 1.4rem), max(0.875rem, calc((100svh - 72px) * 0.0525)));
   }
 
   /* Quick taps on neighbouring cells, or on the lines between them, are
@@ -382,14 +436,26 @@ body {
   width: 100%;
 }
 
+/* aria-disabled is how a control goes quiet while a request is out: unlike
+   disabled, it leaves the focus where the player put it. */
 .button:disabled,
-.select:disabled {
+.select:disabled,
+.button[aria-disabled="true"],
+.select[aria-disabled="true"] {
   opacity: 0.55;
   cursor: not-allowed;
 }
 
-.button:not(:disabled):hover {
-  border-color: var(--border-strong);
+/* Hover only where there is a pointer that hovers: a tap would otherwise leave
+   the border stuck on until the next tap somewhere else. */
+@media (hover: hover) {
+  .button:not(:disabled):not([aria-disabled="true"]):hover {
+    border-color: var(--border-strong);
+  }
+
+  .button--primary:not(:disabled):not([aria-disabled="true"]):hover {
+    border-color: color-mix(in srgb, var(--accent) 80%, black);
+  }
 }
 
 .button--primary {
@@ -513,12 +579,6 @@ body {
 
   .panel--board {
     gap: 8px;
-  }
-
-  /* Arrow keys and Backspace are desktop advice; on a touch screen the line
-     costs a row of pixels and tells the reader nothing. */
-  .panel--board .hint {
-    display: none;
   }
 
   .header__title {

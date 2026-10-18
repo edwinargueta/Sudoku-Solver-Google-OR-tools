@@ -5,8 +5,9 @@
 # first — both are cluster-scoped, and the issuer's kind does not exist
 # until cert-manager's CRDs are installed.
 #
-# Sized for that box, not for a real cluster. One or two cores are shared
-# with k3s, Traefik and cert-manager, so nothing here asks for a whole one.
+# Sized for that box as provisioned, not for a real cluster. Its cores are
+# shared with k3s, Traefik and cert-manager, so nothing here asks for a
+# whole one.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -15,21 +16,29 @@ namespace: sudoku-prod
 resources:
   - namespace.yaml
   - ../../base
+  - redirect-https.yaml
 
 # Built for linux/arm64 — an amd64 image crash-loops with "exec format
-# error" on Ampere. Pushed by .github/workflows/build-and-push.yml, or by
-# `make publish` from a machine with buildx. These names must match what
-# that workflow tags, or the pods sit in ImagePullBackOff.
+# error" on Ampere. Pushed by the build job in .github/workflows/ci.yml, or
+# by `make publish` from a machine with buildx. These names must match that
+# job's matrix names, or the pods sit in ImagePullBackOff.
+#
+# The tag is a placeholder on purpose. `make deploy ENV=prod TAG=<sha>` swaps
+# in the commit CI built, so what runs is recorded in the applied spec, and a
+# restarted container gets the same build back rather than whatever a
+# mutable tag points at by then. Applied as it is, the pods cannot pull.
 images:
   - name: sudoku-api
     newName: ghcr.io/edwinargueta/sudoku-backend
-    newTag: latest
+    newTag: set-by-make-deploy
   - name: sudoku-web
     newName: ghcr.io/edwinargueta/sudoku-frontend
-    newTag: latest
+    newTag: set-by-make-deploy
 
 # The solver is the expensive half and the node is small: keep one of it,
-# and two of the cheap static server so an update rolls without a gap.
+# and two of the cheap static server, so the site stays up while one of
+# them crashes or is evicted. A rollout needs no second replica: the new pod
+# is ready before the old one stops.
 replicas:
   - name: api
     count: 1
@@ -39,3 +48,27 @@ replicas:
 patches:
   - path: api-resources.yaml
   - path: ingress-tls.yaml
+  # A commit tag never changes, so a node that has the image already has
+  # the right one.
+  - target:
+      kind: Deployment
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  # During a rollout both builds serve at once. Traefik's cookie sends a
+  # browser's asset requests to the pod its index.html came from, whose
+  # build has those hashed files.
+  - target:
+      kind: Service
+      name: web
+    patch: |-
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: web
+        annotations:
+          traefik.ingress.kubernetes.io/service.sticky.cookie: "true"
+          traefik.ingress.kubernetes.io/service.sticky.cookie.httponly: "true"
+          traefik.ingress.kubernetes.io/service.sticky.cookie.secure: "true"
+          traefik.ingress.kubernetes.io/service.sticky.cookie.samesite: lax

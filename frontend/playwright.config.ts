@@ -62,9 +62,17 @@ export default defineConfig({
       cwd: '../backend',
       command: `.venv/bin/python -m uvicorn app.main:app --port ${API_PORT} --log-level warning`,
       url: `http://127.0.0.1:${API_PORT}/api/health`,
-      // The runner has four cores; eight CP-SAT workers a solve would only
-      // fight the browsers for them.
-      env: { SUDOKU_SOLVER_WORKERS: '2' },
+      // Pinned, so a backend/.env cannot change what the tests see. One
+      // worker is the fastest on 9x9 and leaves the cores to the browsers.
+      // The solve slots default to the runner's CPUs, which parallel workers
+      // could briefly outnumber and get a 503. The browser only ever talks
+      // to the preview server, so no origin needs CORS.
+      env: {
+        SUDOKU_SOLVER_WORKERS: '1',
+        SUDOKU_SOLVER_TIME_LIMIT_S: '10',
+        SUDOKU_SOLVER_CONCURRENCY: '8',
+        SUDOKU_CORS_ORIGINS: '[]',
+      },
       reuseExistingServer: false,
     },
     {
@@ -72,9 +80,14 @@ export default defineConfig({
       // Plain `vite build`: type errors are the frontend job's to report.
       command: `npx vite build && npx vite preview --host 127.0.0.1 --port ${WEB_PORT} --strictPort`,
       url: `http://127.0.0.1:${WEB_PORT}`,
-      // Pinned here, so a local .env cannot point the bundle somewhere else.
-      // The preview server reuses the dev server's /api proxy.
-      env: { VITE_API_BASE_URL: '/api', VITE_PROXY_TARGET: `http://127.0.0.1:${API_PORT}` },
+      // Pinned here, so a local .env cannot point the bundle somewhere else:
+      // the shell wins over the files for every one of these. The preview
+      // server reuses the dev server's /api proxy.
+      env: {
+        VITE_API_BASE_URL: '/api',
+        VITE_API_DOCS_URL: '/docs',
+        VITE_PROXY_TARGET: `http://127.0.0.1:${API_PORT}`,
+      },
       reuseExistingServer: false,
       timeout: 120_000,
     },

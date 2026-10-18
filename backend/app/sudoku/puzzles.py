@@ -1,10 +1,12 @@
 """A library of sample puzzles, graded by the deduction each one demands.
 
 Difficulty here is the human kind — how much work a person has to do. CP-SAT
-solves every one of them in single-digit milliseconds, which is rather the
-point of letting a constraint solver do it. Each level holds ten puzzles and
-the library hands back a random one, so the same grid does not come up twice
-in a row.
+solves most of them in a millisecond or two, and none, the empty board
+included, in more than a few dozen with the uniqueness check, which is rather
+the point of letting a constraint solver do it. Each difficulty level holds
+ten puzzles and the library hands back a random one; name the puzzle already
+on the board as `exclude` and the draw is never that one, so the same grid
+does not come up twice in a row.
 """
 
 from __future__ import annotations
@@ -159,9 +161,7 @@ def _build() -> tuple[dict[str, Level], dict[str, Puzzle]]:
                     level=key,
                 )
             )
-        levels[key] = Level(
-            key=key, label=label, description=description, puzzles=tuple(puzzles)
-        )
+        levels[key] = Level(key=key, label=label, description=description, puzzles=tuple(puzzles))
         index.update({puzzle.key: puzzle for puzzle in puzzles})
     return levels, index
 
@@ -198,9 +198,16 @@ def level_keys() -> list[str]:
     return list(LEVELS)
 
 
-def random_puzzle(level: str, *, rng: random.Random | None = None) -> Puzzle:
-    """One puzzle picked at random from a level; pass `rng` to make it repeatable."""
-    choices = get_level(level).puzzles
+def random_puzzle(
+    level: str, *, exclude: str | None = None, rng: random.Random | None = None
+) -> Puzzle:
+    """One puzzle picked at random from a level; pass `rng` to make it repeatable.
+
+    `exclude` is a puzzle key the draw must avoid. It is ignored when it is not
+    in the level, or when it is all the level has, as with the blank board.
+    """
+    puzzles = get_level(level).puzzles
+    choices = [puzzle for puzzle in puzzles if puzzle.key != exclude] or puzzles
     return (rng or random).choice(choices)
 
 

@@ -9,6 +9,7 @@
 import { devices } from '@playwright/test'
 
 import type { Board } from '../board'
+import { CONFLICT } from '../board'
 import { expect, test } from '../fixtures'
 
 /** Grid top and pad bottom, relative to the window, and the window's height. */
@@ -57,6 +58,36 @@ for (const name of ['iPhone 13 Mini', 'iPhone 17 Pro Max'] as const) {
       const { gridTop, gridHeight, padBottom, height } = await span(board)
       expect(gridHeight).toBeLessThanOrEqual(height - 72 + 1)
       expect(padBottom - gridTop, `board and pad span ${padBottom - gridTop}px of ${height}px`).toBeLessThanOrEqual(height)
+    })
+
+    // The digits once stayed full size in this small board. Rows left to size
+    // themselves grew to fit them and pushed the last one out under the frame.
+    test('shows every row of the board in full', { tag: '@any-engine' }, async ({ board }) => {
+      const clipped = await board.grid.evaluate((grid) => grid.scrollHeight - grid.clientHeight)
+      expect(clipped, 'pixels of the board hidden under its frame').toBeLessThanOrEqual(0)
+    })
+
+    // A clash is underlined as well as coloured, and its cell grows its line
+    // box to make room for the wave. Sized for full-size digits, that box was
+    // taller than a cell this small: the wave was cut to a sliver, and in
+    // WebKit the bottom row overflowed the frame.
+    test('keeps a marked clash inside its cell', { tag: '@any-engine' }, async ({ board }) => {
+      await board.deal('easy')
+      // Row 1 has a 5 at r1c1, and row 9 a 9 at r9c9.
+      await board.enter(1, 3, 5)
+      await board.enter(9, 1, 9)
+      await board.press('Check Moves')
+      await expect(board.cell(9, 1)).toHaveClass(CONFLICT)
+
+      const clipped = await board.grid.evaluate((grid) => grid.scrollHeight - grid.clientHeight)
+      expect(clipped, 'pixels of the board hidden under its frame').toBeLessThanOrEqual(0)
+      for (const [row, col] of [[1, 3], [9, 1]] as const) {
+        const { lineBox, room } = await board.cell(row, col).evaluate((cell) => ({
+          lineBox: parseFloat(getComputedStyle(cell).lineHeight),
+          room: cell.clientHeight,
+        }))
+        expect(lineBox, `r${row}c${col}'s line box, in a cell ${room}px tall`).toBeLessThanOrEqual(room)
+      }
     })
   })
 }

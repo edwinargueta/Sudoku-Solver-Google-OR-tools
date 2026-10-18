@@ -1,6 +1,9 @@
 /**
  * The 9x9 board: one input per cell, with arrow-key navigation.
  *
+ * It is an ARIA grid of nine rows of nine cells, and one stop in the Tab
+ * order: Tab lands on the cell last chosen, and the arrow keys do the rest.
+ *
  * On a touch screen the cells ask for no keyboard at all, and the number pad
  * under the board does the typing: a phone's own keyboard would cover the
  * bottom of the puzzle while you choose what goes in it.
@@ -26,6 +29,8 @@ interface CellState {
   isPeerOfSelected: boolean
 }
 
+// Worked out here rather than with :nth-child, because each input sits alone
+// inside its own gridcell.
 function cellClassName({
   row,
   col,
@@ -40,6 +45,8 @@ function cellClassName({
     'cell',
     col % 3 === 2 && col !== SIZE - 1 ? 'cell--box-right' : '',
     row % 3 === 2 && row !== SIZE - 1 ? 'cell--box-bottom' : '',
+    col === SIZE - 1 ? 'cell--last-col' : '',
+    row === SIZE - 1 ? 'cell--last-row' : '',
     isGiven ? 'cell--given' : '',
     isLocked ? 'cell--locked' : '',
     isSolved ? 'cell--solved' : '',
@@ -62,7 +69,7 @@ function focusCell(row: number, col: number, touch: boolean): void {
 
 interface SudokuGridProps {
   grid: Grid
-  /** Painted as clues. After a solve this is whatever was typed, not the puzzle. */
+  /** Painted as clues. While a solution is shown this is everything typed before the solve. */
   givens: Set<CellKey>
   /** The puzzle's own clues: focusable and readable, but not editable. */
   locked: Set<CellKey>
@@ -70,6 +77,8 @@ interface SudokuGridProps {
   /** True while the solver runs, which freezes the whole board. */
   readOnly: boolean
   onChange: (row: number, col: number, value: number) => void
+  /** Ctrl+Z or Cmd+Z: the game's Undo, not the browser's. */
+  onUndo: () => void
 }
 
 export default function SudokuGrid({
@@ -79,6 +88,7 @@ export default function SudokuGrid({
   conflictedCells,
   readOnly,
   onChange,
+  onUndo,
 }: SudokuGridProps) {
   // Which cell has the caret, so its row, column and box can be shaded. Local
   // to the board: nothing outside it cares where the cursor is.
@@ -86,6 +96,9 @@ export default function SudokuGrid({
   // What the last pad key did, read out by a screen reader, which stays on the
   // key and so never hears the cell itself change.
   const [announcement, setAnnouncement] = useState('')
+  // The one cell in the Tab order. It stays put when focus leaves the board,
+  // so tabbing back returns to where the player was.
+  const [active, setActive] = useState<Cell>({ row: 0, col: 0 })
   const touch = useCoarsePointer()
 
   // The pad writes the whole cell, so there is nothing to select for it, and
@@ -93,6 +106,7 @@ export default function SudokuGrid({
   function handleFocus(event: FocusEvent<HTMLInputElement>, row: number, col: number): void {
     if (!touch) event.target.select()
     setSelected({ row, col })
+    setActive({ row, col })
   }
 
   /** Stepping between cells, or onto the pad, keeps the shading; leaving the board drops it. */
@@ -121,12 +135,33 @@ export default function SudokuGrid({
 
   function handlePad(value: number): void {
     if (!selected || !canWriteSelected) return
-    onChange(selected.row, selected.col, value)
     const where = `Row ${selected.row + 1} column ${selected.col + 1}`
+    // A key for what the board already shows changes nothing, as on a
+    // keyboard: pressing the 4 the solver put there must not take the
+    // solution down with it.
+    if (grid[selected.row][selected.col] === value) {
+      setAnnouncement(`${where} already ${value === EMPTY ? 'empty' : value}`)
+      return
+    }
+    onChange(selected.row, selected.col, value)
     setAnnouncement(value === EMPTY ? `${where} cleared` : `${where} set to ${value}`)
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>, row: number, col: number): void {
+    // The browser keeps an undo stack per input, which knows nothing of the
+    // game's: its undo would empty this cell and be recorded as a new move,
+    // which Undo would then put back. So the shortcut is the game's Undo, and
+    // redo (Shift+Z, or Ctrl+Y off a Mac), which the game does not have, does
+    // nothing.
+    const letter = event.key.toLowerCase()
+    const undoKeys = (event.ctrlKey || event.metaKey) && letter === 'z'
+    const redoKeys = event.ctrlKey && !event.metaKey && letter === 'y'
+    if (undoKeys || redoKeys) {
+      event.preventDefault()
+      if (undoKeys && !event.shiftKey && !readOnly) onUndo()
+      return
+    }
+
     const moves: Record<string, [number, number]> = {
       ArrowUp: [row - 1, col],
       ArrowDown: [row + 1, col],
@@ -155,8 +190,14 @@ export default function SudokuGrid({
   // whichever side of the 5 the caret was on. That cannot be left to the
   // selection made on focus: a touch screen makes none, and Safari's mouse-up
   // can undo it and leave the caret in front of the old digit. Anything that
-  // is not 1-9 is ignored, and the cell keeps what it had.
+  // is not 1-9 is ignored, and the cell keeps what it had; so is the digit it
+  // already shows, as it is from the pad.
   function handleChange(event: ChangeEvent<HTMLInputElement>, row: number, col: number): void {
+    // Undo from the Edit menu, or a shake on iOS, skips the shortcut above.
+    // Ignored, the input goes back to what the board holds.
+    const { inputType } = event.nativeEvent as InputEvent
+    if (inputType?.startsWith('history')) return
+
     const text = event.target.value
     if (text === '') {
       onChange(row, col, EMPTY)
@@ -164,46 +205,54 @@ export default function SudokuGrid({
     }
     const before = grid[row][col] === EMPTY ? '' : String(grid[row][col])
     const typed = text.replace(before, '').replace(/[^1-9]/g, '').slice(-1)
-    if (typed !== '') onChange(row, col, Number(typed))
+    if (typed !== '' && Number(typed) !== grid[row][col]) onChange(row, col, Number(typed))
   }
 
   return (
     <>
       <div className="grid" role="grid" aria-label="Sudoku board">
-        {grid.map((cells, row) =>
-          cells.map((value, col) => {
-            const key = cellKey(row, col)
-            return (
-              <input
-                key={key}
-                data-cell={key}
-                className={cellClassName({
-                  row,
-                  col,
-                  isGiven: givens.has(key),
-                  isLocked: locked.has(key),
-                  isSolved: !givens.has(key) && value !== EMPTY,
-                  isConflicted: conflictedCells.has(key),
-                  isSelected: selected?.row === row && selected.col === col,
-                  isPeerOfSelected: selected ? isPeer(selected, { row, col }) : false,
-                })}
-                type="text"
-                inputMode={touch ? 'none' : 'numeric'}
-                autoComplete="off"
-                maxLength={2}
-                readOnly={readOnly || locked.has(key)}
-                aria-label={`row ${row + 1} column ${col + 1}`}
-                value={value === EMPTY ? '' : String(value)}
-                onChange={(event) => handleChange(event, row, col)}
-                onKeyDown={(event) => handleKeyDown(event, row, col)}
-                onFocus={(event) => handleFocus(event, row, col)}
-                onBlur={handleBlur}
-                onMouseDown={handleMouseDown}
-                onTouchEnd={handleTouchEnd}
-              />
-            )
-          }),
-        )}
+        {grid.map((cells, row) => (
+          // The rows and cells are there for assistive tech. They are
+          // display: contents, so the inputs are still the grid's items.
+          <div key={row} role="row" className="grid__row">
+            {cells.map((value, col) => {
+              const key = cellKey(row, col)
+              const conflicted = conflictedCells.has(key)
+              return (
+                <div key={key} role="gridcell" className="grid__cell">
+                  <input
+                    data-cell={key}
+                    className={cellClassName({
+                      row,
+                      col,
+                      isGiven: givens.has(key),
+                      isLocked: locked.has(key),
+                      isSolved: !givens.has(key) && value !== EMPTY,
+                      isConflicted: conflicted,
+                      isSelected: selected?.row === row && selected.col === col,
+                      isPeerOfSelected: selected ? isPeer(selected, { row, col }) : false,
+                    })}
+                    type="text"
+                    inputMode={touch ? 'none' : 'numeric'}
+                    autoComplete="off"
+                    maxLength={2}
+                    readOnly={readOnly || locked.has(key)}
+                    tabIndex={active.row === row && active.col === col ? 0 : -1}
+                    aria-label={`row ${row + 1} column ${col + 1}`}
+                    aria-invalid={conflicted || undefined}
+                    value={value === EMPTY ? '' : String(value)}
+                    onChange={(event) => handleChange(event, row, col)}
+                    onKeyDown={(event) => handleKeyDown(event, row, col)}
+                    onFocus={(event) => handleFocus(event, row, col)}
+                    onBlur={handleBlur}
+                    onMouseDown={handleMouseDown}
+                    onTouchEnd={handleTouchEnd}
+                  />
+                </div>
+              )
+            })}
+          </div>
+        ))}
       </div>
       {touch ? (
         <NumberPad

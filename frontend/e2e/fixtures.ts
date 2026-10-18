@@ -10,6 +10,9 @@ import { test as base, expect } from '@playwright/test'
 
 import { Board } from './board'
 
+/** GET /api/levels/{key}/random, with or without a query. */
+export const RANDOM_DRAW = /\/api\/levels\/([^/?]+)\/random(\?.*)?$/
+
 interface Fixtures {
   /** On unless a test says otherwise with test.use({ pinPuzzles: false }). */
   pinPuzzles: boolean
@@ -23,12 +26,13 @@ export const test = base.extend<Fixtures>({
     // The random route takes no seed, so a test could never say which clue is
     // where. Sending it to the level's first puzzle keeps the real backend in
     // the loop and makes the board known. Blank has only the one, keyed blank.
+    // New puzzle adds ?exclude=, which the pinned draw has no use for.
     if (pinPuzzles) {
-      await page.route('**/api/levels/*/random', (route) => {
+      await page.route(RANDOM_DRAW, (route) => {
         const url = route.request().url()
         return url.includes('/levels/blank/')
           ? route.continue()
-          : route.continue({ url: url.replace(/\/levels\/([^/]+)\/random$/, '/puzzles/$1-1') })
+          : route.continue({ url: url.replace(RANDOM_DRAW, '/api/puzzles/$1-1') })
       })
     }
 

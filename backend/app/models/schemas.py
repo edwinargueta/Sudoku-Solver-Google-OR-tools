@@ -2,62 +2,68 @@
 
 These are the contract the React client codes against: a grid is always a 9x9
 array of ints with 0 for an empty cell, both on the way in and on the way out.
+
+Requests are strict. A cell must be a JSON integer — `true`, `"5"` and `5.0`
+are refused rather than read as 1 and 5 — and an unknown field is an error,
+so a misspelt `max_solution` cannot quietly fall back to the default.
 """
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
-from app.sudoku.board import Conflict, Grid, count_givens, parse_grid, validate_shape
+from app.sudoku.board import SIZE, Conflict, Grid, count_givens, parse_grid
 from app.sudoku.puzzles import Level, Puzzle
 from app.sudoku.solver import MAX_SOLUTIONS_CAP, MAX_TIME_LIMIT_S, SolveResult, SolveStatus
 
-
-def _validated_grid(value: list[list[int]]) -> list[list[int]]:
-    """Field validator: 9x9, every cell 0-9. Raises ValueError -> HTTP 422."""
-    validate_shape(value)
-    return value
-
-
+# Spelt out in the types, not left to a validator, so /docs shows the shape.
+Cell = Annotated[StrictInt, Field(ge=0, le=9)]
+Row = Annotated[list[Cell], Field(min_length=SIZE, max_length=SIZE)]
 GridField = Annotated[
-    list[list[int]],
-    Field(description="9x9 grid, 0 for an empty cell"),
+    list[Row],
+    Field(min_length=SIZE, max_length=SIZE, description="9x9 grid, 0 for an empty cell"),
 ]
 
-EXAMPLE_PUZZLE = (
-    "530070000600195000098000060800060003400803001700020006060000280000419005000080079"
-)
+#: Room for render()'s pretty-printed grid (241 characters), with CRLF line
+#: endings and some indentation, not just the bare 81.
+MAX_PUZZLE_LENGTH = 1_000
+
+EXAMPLE_PUZZLE = "530070000600195000098000060800060003400803001700020006060000280000419005000080079"
 
 
 class SolveRequest(BaseModel):
     """A puzzle to solve, given either as a grid or as an 81-character string."""
 
     model_config = ConfigDict(
-        json_schema_extra={
-            "examples": [{"puzzle": EXAMPLE_PUZZLE, "max_solutions": 2}]
-        }
+        extra="forbid",
+        json_schema_extra={"examples": [{"puzzle": EXAMPLE_PUZZLE, "max_solutions": 2}]},
     )
 
     grid: GridField | None = None
     puzzle: str | None = Field(
-        default=None, description="81 characters, '.' or '0' for an empty cell"
+        default=None,
+        max_length=MAX_PUZZLE_LENGTH,
+        description=(
+            "81 cells, '.', '0' or '_' for an empty one; whitespace and the | - +"
+            " of a pretty-printed grid are skipped"
+        ),
     )
-    max_solutions: int = Field(
+    max_solutions: StrictInt = Field(
         default=1,
         ge=1,
         le=MAX_SOLUTIONS_CAP,
         description="Ask for 2 to find out whether the puzzle is well-posed",
     )
     time_limit_s: float | None = Field(
-        default=None, gt=0, le=MAX_TIME_LIMIT_S, description="Defaults to the server setting"
+        default=None,
+        strict=True,
+        allow_inf_nan=False,
+        gt=0,
+        le=MAX_TIME_LIMIT_S,
+        description="Defaults to the server's limit, and cannot go above it",
     )
-
-    @field_validator("grid")
-    @classmethod
-    def _check_grid(cls, value: list[list[int]] | None) -> list[list[int]] | None:
-        return None if value is None else _validated_grid(value)
 
     @field_validator("puzzle")
     @classmethod
@@ -78,7 +84,10 @@ class SolveRequest(BaseModel):
 
 
 class ConflictModel(BaseModel):
-    """A given that repeats inside its row, column or box."""
+    """A given that repeats inside its row, column or box.
+
+    Every cell of a clash is listed, once for each unit it repeats in.
+    """
 
     row: int = Field(description="0-indexed row")
     col: int = Field(description="0-indexed column")
@@ -106,10 +115,19 @@ class SolveResponse(BaseModel):
     solution_count: int = 0
     unique: bool = Field(
         default=False,
-        description="Exactly one solution exists (only meaningful when max_solutions > 1)",
+        description=(
+            "The search ran to the end and found exactly one solution"
+            " (only possible when max_solutions > 1)"
+        ),
+    )
+    exhaustive: bool = Field(
+        description="The search ran to the end, so solution_count is every solution there is"
     )
     truncated: bool = Field(
-        default=False, description="Search stopped at max_solutions; more may exist"
+        default=False,
+        description=(
+            "Search stopped early (at max_solutions or the time limit); more solutions may exist."
+        ),
     )
     wall_time_ms: float = 0.0
     branches: int = 0
@@ -123,6 +141,7 @@ class SolveResponse(BaseModel):
             solutions=result.solutions,
             solution_count=result.solution_count,
             unique=result.is_unique,
+            exhaustive=result.exhaustive,
             truncated=result.truncated,
             wall_time_ms=round(result.wall_time_ms, 3),
             branches=result.branches,
@@ -133,12 +152,9 @@ class SolveResponse(BaseModel):
 class ValidateRequest(BaseModel):
     """A grid to check for contradictions among its givens."""
 
-    grid: GridField
+    model_config = ConfigDict(extra="forbid")
 
-    @field_validator("grid")
-    @classmethod
-    def _check_grid(cls, value: list[list[int]]) -> list[list[int]]:
-        return _validated_grid(value)
+    grid: GridField
 
 
 class ValidateResponse(BaseModel):
@@ -202,6 +218,6 @@ class HealthResponse(BaseModel):
 
 
 class ErrorResponse(BaseModel):
-    """The body returned with a 4xx from this API."""
+    """The body of a 404, 413 or 503 from this API; a 422 carries a list instead."""
 
-    detail: str | Any
+    detail: str

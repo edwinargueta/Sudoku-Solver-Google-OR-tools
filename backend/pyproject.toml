@@ -5,19 +5,22 @@ description = "FastAPI backend that solves Sudoku with Google OR-Tools CP-SAT"
 requires-python = ">=3.11"
 authors = [{ name = "Edwin Argueta" }]
 
+# Ranges say what the code is written against; requirements.lock and
+# requirements-dev.lock say what CI tested and the image ships. `make lock`
+# re-pins both after a change here.
 dependencies = [
-    "ortools>=9.14",
-    "fastapi>=0.115",
-    "uvicorn[standard]>=0.30",
-    "pydantic>=2.7",
-    "pydantic-settings>=2.3",
+    "ortools>=9.14,<10",
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.30,<1",
+    "pydantic>=2.9,<3",
+    "pydantic-settings>=2.3,<3",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
-    "httpx>=0.27",
-    "ruff>=0.6",
+    "pytest>=8.0,<10",
+    "httpx>=0.27,<1",
+    "ruff>=0.6,<1",
 ]
 
 [build-system]

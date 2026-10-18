@@ -11,16 +11,20 @@ dist/
 .coverage
 htmlcov/
 
-# Virtual environments
+# Virtual environments. Anchored, so a source folder that happens to be
+# called env/ (frontend/src/env/, say) is still committed.
 .venv/
-venv/
-env/
+/venv/
+/env/
+/backend/venv/
+/backend/env/
 
 # --- Node / Vite ---
 node_modules/
 dist/
 dist-ssr/
 .vite/
+*.tsbuildinfo
 *.local
 npm-debug.log*
 yarn-error.log*

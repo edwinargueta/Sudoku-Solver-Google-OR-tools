@@ -10,19 +10,34 @@ import StatusLine from './components/StatusLine'
 import SudokuGrid from './components/SudokuGrid'
 import { useSudoku } from './hooks/useSudoku'
 
-// The Vite dev server proxies /api only, so the docs link points at uvicorn.
-const DOCS_URL = import.meta.env.VITE_API_DOCS_URL ?? 'http://127.0.0.1:8000/docs'
+// The Vite dev server proxies /api only, so there the docs link points at
+// uvicorn. A build is served from behind a proxy that passes /docs through.
+const DOCS_URL =
+  import.meta.env.VITE_API_DOCS_URL ??
+  (import.meta.env.DEV ? 'http://127.0.0.1:8000/docs' : '/docs')
 
-/** Small badge in the header proving the backend is up and which build it runs. */
+/** How often to ask again while the API is down. */
+export const HEALTH_RETRY_MS = 15_000
+
+/**
+ * Small badge in the header proving the backend is up and which build it runs.
+ *
+ * It asks again whenever the page comes back into view or the network comes
+ * back, and every HEALTH_RETRY_MS while the API is down, so a blip at load
+ * time does not leave it saying "API offline" for good.
+ */
 function BackendBadge() {
   const [health, setHealth] = useState<Health | null>(null)
   const [failed, setFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     let cancelled = false
     getHealth()
       .then((data) => {
-        if (!cancelled) setHealth(data)
+        if (cancelled) return
+        setHealth(data)
+        setFailed(false)
       })
       .catch(() => {
         if (!cancelled) setFailed(true)
@@ -30,7 +45,21 @@ function BackendBadge() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [attempt])
+
+  useEffect(() => {
+    function recheck(): void {
+      if (document.visibilityState === 'visible') setAttempt((count) => count + 1)
+    }
+    window.addEventListener('online', recheck)
+    document.addEventListener('visibilitychange', recheck)
+    const timer = failed ? window.setInterval(recheck, HEALTH_RETRY_MS) : undefined
+    return () => {
+      window.removeEventListener('online', recheck)
+      document.removeEventListener('visibilitychange', recheck)
+      window.clearInterval(timer)
+    }
+  }, [failed])
 
   if (failed) return <span className="badge badge--down">API offline</span>
   if (!health) return <span className="badge">connecting…</span>
@@ -58,8 +87,11 @@ export default function App() {
             levels={sudoku.levels}
             level={sudoku.level}
             busy={sudoku.busy}
+            failed={sudoku.levelsFailed}
+            loading={sudoku.levelsLoading}
             onPickLevel={sudoku.loadLevel}
             onShuffle={sudoku.shuffle}
+            onRetry={sudoku.retryLevels}
           />
           <SudokuGrid
             grid={sudoku.displayGrid}
@@ -68,10 +100,13 @@ export default function App() {
             conflictedCells={sudoku.conflictedCells}
             readOnly={sudoku.busy}
             onChange={sudoku.updateCell}
+            onUndo={sudoku.undo}
           />
           <BoardActions
             busy={sudoku.busy}
+            solving={sudoku.pending === 'solve'}
             isEmpty={sudoku.isEmpty}
+            solved={sudoku.solution !== null}
             canUndo={sudoku.canUndo}
             onSolve={sudoku.solve}
             onCheck={sudoku.check}

@@ -1,4 +1,10 @@
-# The deployed shape, locally: nginx on :8080 in front of uvicorn, one origin.
+# Both images under the constraints the cluster puts on them: a read-only
+# root with the same writable mounts, no capabilities, one CPU for the API.
+# A write to somewhere new fails here first rather than in a pod.
+#
+# One difference is on purpose. Here nginx proxies /api to uvicorn; in the
+# cluster the ingress sends /api straight to the api Service, and nginx only
+# sees the docs paths.
 name: sudoku-solver
 
 services:
@@ -6,10 +12,27 @@ services:
     build: ./backend
     environment:
       SUDOKU_SOLVER_TIME_LIMIT_S: "10.0"
-      # Keep this near the CPUs the container actually gets.
-      SUDOKU_SOLVER_WORKERS: "4"
+      # As in the cluster: one search worker, and two solves at a time on
+      # the one CPU below. The default would count every CPU on the host.
+      SUDOKU_SOLVER_WORKERS: "1"
+      SUDOKU_SOLVER_CONCURRENCY: "2"
+      # The port is only exposed on the compose network, never published,
+      # so these headers all come through nginx. With nothing in front of
+      # it, nginx adds to what the client sent rather than replacing it, so
+      # the address in the log, and the scheme in a redirect, are whatever
+      # the caller claims. That is harmless here: the site is published on
+      # 127.0.0.1 only. In the cluster Traefik is in front and replaces them.
+      FORWARDED_ALLOW_IPS: "*"
     expose:
       - "8000"
+    cpus: 1
+    read_only: true
+    # World-writable, as an emptyDir is; Docker's default is root's alone.
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
 
   web:
     build:
@@ -17,7 +40,18 @@ services:
     environment:
       BACKEND_ORIGIN: http://api:8000
     ports:
-      - "8080:8080"
+      # This machine only, not the rest of the network.
+      - "127.0.0.1:8080:8080"
+    read_only: true
+    # What the pod mounts as emptyDir: the rendered config, nginx's scratch
+    # files and its pid.
+    tmpfs:
+      - /etc/nginx/conf.d:mode=1777
+      - /var/cache/nginx:mode=1777
+      - /run:mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       api:
         condition: service_healthy

@@ -10,7 +10,10 @@ export type Grid = number[][]
 /** What CP-SAT concluded, flattened to the cases the UI cares about. */
 export type SolveStatus = 'SOLVED' | 'INFEASIBLE' | 'UNKNOWN'
 
-/** A given that repeats inside its row, column or box. */
+/**
+ * A given that repeats inside its row, column or box. Every cell of a clash is
+ * reported, once for each unit it repeats in.
+ */
 export interface Conflict {
   row: number
   col: number
@@ -41,7 +44,11 @@ export interface SolveResponse {
   solution: Grid | null
   solutions: Grid[]
   solution_count: number
+  /** The search ran to the end and found exactly one solution. */
   unique: boolean
+  /** The search ran to the end, so solution_count is every solution there is. */
+  exhaustive: boolean
+  /** The search stopped early, at max_solutions or the time limit. */
   truncated: boolean
   wall_time_ms: number
   branches: number

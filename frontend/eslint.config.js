@@ -28,6 +28,11 @@ export default tseslint.config(
     },
   },
   {
+    // Plain JavaScript, which is only this file, gets the core rules too.
+    files: ['**/*.js'],
+    extends: [js.configs.recommended],
+  },
+  {
     // Config files run in Node, not the browser.
     files: ['vite.config.ts', 'eslint.config.js'],
     languageOptions: { globals: globals.node },

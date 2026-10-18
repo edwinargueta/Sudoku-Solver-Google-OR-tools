@@ -17,9 +17,19 @@ configMapGenerator:
   - name: api-config
     literals:
       - SUDOKU_SOLVER_TIME_LIMIT_S=10.0
-      # At or below the pod's CPU limit. CP-SAT will start eight search
-      # workers on a one-core pod and spend the time context-switching.
-      - SUDOKU_SOLVER_WORKERS=2
+      # One search worker. On a 9x9 grid CP-SAT's parallel portfolio only
+      # adds start-up and contention, and one thread is what the pod's
+      # one-CPU limit can run anyway.
+      - SUDOKU_SOLVER_WORKERS=1
+      # Solves at once before a 503. The default counts the node's CPUs,
+      # which the pod's limit does not change; two share its one CPU.
+      - SUDOKU_SOLVER_CONCURRENCY=2
+      # Read by uvicorn: whose X-Forwarded-For and -Proto it believes. This
+      # is k3s's default pod network, where Traefik and the web pods run. A
+      # client outside the cluster only gets here through Traefik, which
+      # replaces those headers with what it saw itself; nothing is trusted
+      # from anywhere else. Change it with the cluster's --cluster-cidr.
+      - FORWARDED_ALLOW_IPS=10.42.0.0/16
 
 images:
   - name: sudoku-api

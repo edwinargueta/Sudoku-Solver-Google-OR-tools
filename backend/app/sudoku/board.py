@@ -7,6 +7,7 @@ API both speak.
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 
 SIZE = 9
@@ -17,12 +18,20 @@ DIGITS = range(1, SIZE + 1)
 Grid = list[list[int]]
 
 #: Characters accepted for an empty cell when parsing a puzzle string.
-BLANKS = frozenset({".", "0", "-", " ", "_"})
+BLANKS = frozenset({".", "0", "_"})
+
+#: Box separators that parse_grid skips, along with any whitespace: what
+#: render() draws between the cells.
+LAYOUT = frozenset({"|", "-", "+"})
 
 
 @dataclass(frozen=True, slots=True)
 class Conflict:
-    """Two givens that cannot coexist, and the unit that puts them in conflict."""
+    """A given that repeats a digit in one of its units.
+
+    A clash involves at least two cells, and each of them gets a Conflict of
+    its own for every unit the repeat happens in.
+    """
 
     row: int
     col: int
@@ -44,23 +53,21 @@ def clone(grid: Grid) -> Grid:
 
 
 def parse_grid(text: str) -> Grid:
-    """Read an 81-character puzzle string into a grid.
+    """Read an 81-cell puzzle string into a grid.
 
-    Accepts '.', '0', '-', '_' and spaces as empty cells, and ignores newlines,
-    pipes and plus signs so that pretty-printed puzzles round-trip.
+    Accepts '.', '0' and '_' as empty cells, and skips whitespace, pipes,
+    dashes and plus signs, so render()'s pretty-printed output round-trips.
     """
-    cleaned = [ch for ch in text if ch not in "\n\r|+"]
+    cleaned = [ch for ch in text if not ch.isspace() and ch not in LAYOUT]
     if len(cleaned) != SIZE * SIZE:
-        raise ValueError(
-            f"expected {SIZE * SIZE} cells, got {len(cleaned)}"
-        )
+        raise ValueError(f"expected {SIZE * SIZE} cells, got {len(cleaned)}")
 
     grid = empty_grid()
     for index, ch in enumerate(cleaned):
         row, col = divmod(index, SIZE)
         if ch in BLANKS:
             grid[row][col] = EMPTY
-        elif ch.isdigit() and int(ch) in DIGITS:
+        elif ch in "123456789":  # not isdigit(), which also passes '٣' and '²'
             grid[row][col] = int(ch)
         else:
             raise ValueError(f"unexpected character {ch!r} at position {index}")
@@ -69,9 +76,7 @@ def parse_grid(text: str) -> Grid:
 
 def format_grid(grid: Grid, blank: str = ".") -> str:
     """Flatten a grid back into an 81-character string."""
-    return "".join(
-        blank if value == EMPTY else str(value) for row in grid for value in row
-    )
+    return "".join(blank if value == EMPTY else str(value) for row in grid for value in row)
 
 
 def render(grid: Grid) -> str:
@@ -106,32 +111,29 @@ def box_index(row: int, col: int) -> int:
     return (row // BOX) * BOX + (col // BOX)
 
 
+def _units(row: int, col: int) -> tuple[tuple[str, int], ...]:
+    """The three units a cell belongs to, in the order conflicts are listed."""
+    return (("row", row), ("column", col), ("box", box_index(row, col)))
+
+
 def find_conflicts(grid: Grid) -> list[Conflict]:
-    """Every given that duplicates another in its row, column or box.
+    """Every given that repeats a digit in its row, column or box.
+
+    Every cell of a repeat is listed, not just the later one: a grid does not
+    say which cells are the puzzle's clues, so which one is wrong is the
+    caller's call. The list runs cell by cell, then row, column, box.
 
     An empty list means the puzzle is *consistent*, not that it is solvable —
     only the solver can tell you that.
     """
-    conflicts: list[Conflict] = []
-    seen_rows: list[dict[int, int]] = [{} for _ in range(SIZE)]
-    seen_cols: list[dict[int, int]] = [{} for _ in range(SIZE)]
-    seen_boxes: list[dict[int, int]] = [{} for _ in range(SIZE)]
-
-    for r in range(SIZE):
-        for c in range(SIZE):
-            value = grid[r][c]
-            if value == EMPTY:
-                continue
-            for unit, table, key in (
-                ("row", seen_rows[r], r),
-                ("column", seen_cols[c], c),
-                ("box", seen_boxes[box_index(r, c)], box_index(r, c)),
-            ):
-                if value in table:
-                    conflicts.append(Conflict(row=r, col=c, unit=unit, value=value))
-                else:
-                    table[value] = key
-    return conflicts
+    filled = [(r, c, grid[r][c]) for r in range(SIZE) for c in range(SIZE) if grid[r][c] != EMPTY]
+    counts = Counter((unit, index, value) for r, c, value in filled for unit, index in _units(r, c))
+    return [
+        Conflict(row=r, col=c, unit=unit, value=value)
+        for r, c, value in filled
+        for unit, index in _units(r, c)
+        if counts[unit, index, value] > 1
+    ]
 
 
 def is_consistent(grid: Grid) -> bool:
@@ -150,8 +152,8 @@ def count_givens(grid: Grid) -> int:
 
 
 if __name__ == "__main__":
-    from app.sudoku.puzzles import PUZZLES
+    from app.sudoku.puzzles import DEFAULT_KEY, get
 
-    puzzle = parse_grid(PUZZLES["easy"].puzzle)
+    puzzle = parse_grid(get(DEFAULT_KEY).puzzle)
     print(render(puzzle))
     print(f"\ngivens: {count_givens(puzzle)}  consistent: {is_consistent(puzzle)}")

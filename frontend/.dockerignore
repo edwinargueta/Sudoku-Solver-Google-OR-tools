@@ -1,7 +1,11 @@
 node_modules/
 dist/
-.env
-.env.local
+# Vite reads .env.production and .env.production.local during `vite build`,
+# so a developer's local file would end up baked into the image.
+.env*
+*.local
+*.tsbuildinfo
+.DS_Store
 
 # The browser tests never run in the image. Left in, an edit to one would
 # invalidate the build's COPY layer and rebuild the bundle for nothing.

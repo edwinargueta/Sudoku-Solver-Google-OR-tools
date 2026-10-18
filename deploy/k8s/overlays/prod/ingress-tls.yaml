@@ -11,6 +11,8 @@ metadata:
   name: sudoku
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
+    # <namespace>-<name>@kubernetescrd: the Middleware in redirect-https.yaml.
+    traefik.ingress.kubernetes.io/router.middlewares: sudoku-prod-redirect-https@kubernetescrd
 spec:
   tls:
     - hosts:

@@ -14,6 +14,10 @@ spec:
       labels:
         app.kubernetes.io/name: web
     spec:
+      # Nothing here talks to the Kubernetes API or reads another Service's
+      # address from the environment.
+      automountServiceAccountToken: false
+      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 101
@@ -48,6 +52,12 @@ spec:
               port: http
             initialDelaySeconds: 10
             periodSeconds: 20
+          lifecycle:
+            # Keeps serving while Traefik catches up with the pod leaving,
+            # instead of refusing the requests it still sends.
+            preStop:
+              exec:
+                command: ["sleep", "5"]
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

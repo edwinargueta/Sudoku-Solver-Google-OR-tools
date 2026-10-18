@@ -1,6 +1,7 @@
-# A free Ampere VM has one or two cores in total. Requesting a whole one
-# would leave the pod Pending; CP-SAT is given two search workers in the
-# base config, which this comfortably covers.
+# The VM's cores are shared with k3s, Traefik and cert-manager, so requesting
+# a whole one could leave the pod Pending. The limit is one CPU: the one
+# search worker in the base config uses no more, and a long solve is held
+# to it rather than starving the node.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

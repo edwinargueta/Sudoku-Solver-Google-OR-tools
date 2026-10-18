@@ -1,0 +1,13 @@
+# Sends plain-HTTP visitors to HTTPS; the Ingress in ingress-tls.yaml names
+# it. A request already on HTTPS passes straight through. cert-manager's
+# HTTP-01 challenge still works: its solver gets an Ingress of its own for
+# the challenge path, without this middleware, and Let's Encrypt would
+# follow the redirect anyway.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-https
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true

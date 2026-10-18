@@ -2,3 +2,8 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: sudoku-prod
+  labels:
+    # Both pods already meet the restricted profile; this keeps it that way.
+    # cert-manager's HTTP-01 solver pods run in this namespace too, and
+    # meet it as well.
+    pod-security.kubernetes.io/enforce: restricted

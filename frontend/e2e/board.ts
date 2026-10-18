@@ -71,6 +71,20 @@ export class Board {
     await expect(this.status).toHaveText(/^Loaded /)
   }
 
+  /**
+   * Answer the next "throw your moves away?" the app asks, as the player
+   * would. Playwright dismisses a dialog nobody handles, so a test that means
+   * to discard its moves has to say so. Resolves to the question asked.
+   */
+  answerNextDialog(accept: boolean): Promise<string> {
+    return new Promise((resolve) => {
+      this.page.once('dialog', async (dialog) => {
+        resolve(dialog.message())
+        await (accept ? dialog.accept() : dialog.dismiss())
+      })
+    })
+  }
+
   /** Tapped on a touch screen, clicked otherwise; always the cell's centre. */
   async choose(row: number, col: number): Promise<void> {
     if (this.touch) await this.cell(row, col).tap()
